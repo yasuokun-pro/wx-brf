@@ -1,0 +1,17 @@
+{
+  "name": "WX BRF 気象ブリーフィング",
+  "short_name": "WX BRF",
+  "description": "ヘリコプター運航向け気象ブリーフィング補助(プロトタイプ)",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a1420",
+  "theme_color": "#0a1420",
+  "lang": "ja",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

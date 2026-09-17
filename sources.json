@@ -1,0 +1,75 @@
+{
+  "_note": "取得元の定義。気象庁の内部URLは非公式仕様なので、変わったらここだけ直す。staleMin=この分数を超えたら黄色表示",
+  "jmatile": "https://www.jma.go.jp/bosai/jmatile/data",
+  "nowcast": {
+    "timesPast": "https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json",
+    "timesFcst": "https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json",
+    "timesThunder": "https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json",
+    "tile": "{base}/nowc/{basetime}/none/{validtime}/surf/{element}/{z}/{x}/{y}.png",
+    "geojson": "{base}/nowc/{basetime}/none/{validtime}/surf/{element}/data.geojson",
+    "maxNativeZoom": 14,
+    "staleMin": 15,
+    "page": "https://www.jma.go.jp/bosai/nowc/"
+  },
+  "rasrf": {
+    "times": "https://www.jma.go.jp/bosai/jmatile/data/rasrf/targetTimes.json",
+    "tile": "{base}/rasrf/{basetime}/{member}/{validtime}/surf/rasrf/{z}/{x}/{y}.png",
+    "_members": "immed=速報版(10分毎・6時間先) / none=通常版(1時間毎・15時間先)",
+    "maxNativeZoom": 12,
+    "staleMin": 90,
+    "page": "https://www.jma.go.jp/bosai/kaikotan/"
+  },
+  "himawari": {
+    "times": "https://www.jma.go.jp/bosai/himawari/data/satimg/targetTimes_jp.json",
+    "tile": "https://www.jma.go.jp/bosai/himawari/data/satimg/{basetime}/jp/{validtime}/{band}/{z}/{x}/{y}.jpg",
+    "maxNativeZoom": 6,
+    "bands": [
+      { "id": "B13/TBB", "name": "赤外" },
+      { "id": "B08/TBB", "name": "水蒸気" },
+      { "id": "B03/ALBD", "name": "可視" },
+      { "id": "SND/ETC", "name": "雲頂強調" },
+      { "id": "REP/ETC", "name": "トゥルーカラー" }
+    ],
+    "staleMin": 30,
+    "page": "https://www.jma.go.jp/bosai/himawari/"
+  },
+  "weatherMap": {
+    "list": "https://www.jma.go.jp/bosai/weather_map/data/list.json",
+    "image": "https://www.jma.go.jp/bosai/weather_map/data/png/{file}",
+    "staleMin": { "now": 240, "ft24": 780, "ft48": 780 },
+    "page": "https://www.jma.go.jp/bosai/weather_map/"
+  },
+  "nwpPdf": {
+    "url": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/{id}_{hh}.pdf",
+    "page": "https://www.jma.go.jp/bosai/numericmap/",
+    "staleMin": 840,
+    "charts": [
+      { "id": "aupq35", "name": "AUPQ35 高層天気図 500/300hPa", "hh": ["00", "12"] },
+      { "id": "aupq78", "name": "AUPQ78 高層天気図 850/700hPa", "hh": ["00", "12"] },
+      { "id": "axfe578", "name": "AXFE578 解析 850hPa気温・風・700hPa上昇流 / 500hPa気温・700hPa湿数", "hh": ["00", "12"] },
+      { "id": "fxfe502", "name": "FXFE502 12・24h予想 500hPa高度・渦度 / 地上気圧・降水量", "hh": ["00", "12"] },
+      { "id": "fxfe5782", "name": "FXFE5782 12・24h予想 850hPa気温・風・700hPa上昇流 / 500hPa気温・700hPa湿数", "hh": ["00", "12"] }
+    ]
+  },
+  "weekly": {
+    "forecast": "https://www.jma.go.jp/bosai/forecast/data/forecast/{office}.json",
+    "areaList": "https://www.jma.go.jp/bosai/common/const/area.json",
+    "supportPdf": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/feas50_12.pdf",
+    "supportName": "FEAS50 週間予報支援図（アンサンブル）",
+    "staleMin": 840,
+    "supportStaleMin": 1800,
+    "page": "https://www.jma.go.jp/bosai/forecast/"
+  },
+  "commentary": {
+    "tankiPdf": "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_tanki_latest.pdf",
+    "shukanPdf": "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_shukan_latest.pdf",
+    "aviationAirspace": "https://www.data.jma.go.jp/airinfo/data/pict/ajpn_cmnt/qyya82.png",
+    "aviationPage": "https://www.data.jma.go.jp/airinfo/data/awfo_ajpn_cmnt_airspace.html",
+    "staleMin": 840
+  },
+  "baseMap": {
+    "tile": "https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png",
+    "attribution": "地理院タイル",
+    "maxNativeZoom": 18
+  }
+}

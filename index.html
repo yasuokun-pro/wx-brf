@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a1420">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="WX BRF">
+<title>WX BRF</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  /* 配色・フォントはナビPWA(heli-nav-pwa)と同じ。フェーズ4で統合するため変数名も揃える */
+  :root{
+    --bg:#0a1420;--panel:#101f30;--panel2:#0d1a29;--line:#1e3550;
+    --txt:#d7e3ee;--dim:#7d93a8;
+    --grn:#38e07b;--amb:#ffb02e;--mag:#ff3df5;--cyn:#3df5ff;--red:#ff5c5c;--blu:#4da3ff;--gry:#5b6b7a;
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+    --sans:'Noto Sans JP',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+  /* ⚠ iOSはボタンのダブルタップで画面を拡大する。地図以外は manipulation で止める */
+  body,header,footer,.card,button,input,select,.tabs{touch-action:manipulation}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--txt);font-family:var(--sans);display:flex;flex-direction:column;
+    height:100dvh;overflow:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left)}
+  a{color:var(--blu)}
+  button{font-family:var(--sans);color:var(--txt);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:13px;cursor:pointer}
+  button:active{background:var(--line)}
+  button.on{border-color:var(--cyn);color:var(--cyn)}
+  input,select{font-family:var(--mono);color:var(--txt);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:14px}
+
+  header{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .logo{font-family:var(--mono);font-weight:600;letter-spacing:.18em;font-size:15px;color:var(--grn);white-space:nowrap}
+  .clocks{margin-left:auto;display:flex;gap:12px;font-family:var(--mono);font-size:15px;font-weight:600;white-space:nowrap}
+  .clocks b{color:var(--dim);font-weight:400;font-size:10px;margin-right:4px}
+  #net{font-size:11px;font-family:var(--mono);padding:2px 6px;border-radius:4px;border:1px solid var(--line);color:var(--grn)}
+  #net.off{color:var(--amb);border-color:var(--amb)}
+
+  .tabs{display:flex;gap:4px;overflow-x:auto;padding:6px 8px;background:var(--panel2);border-bottom:1px solid var(--line);scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tabs button{flex:0 0 auto;font-size:12px;padding:5px 9px;display:flex;align-items:center;gap:5px}
+  .tabs button .n{font-family:var(--mono);color:var(--dim)}
+  .tabs button.cur{border-color:var(--grn);color:var(--grn)}
+  .tabs button.cur .n{color:var(--grn)}
+  .tabs button.later{opacity:.45}
+
+  /* 画面は横に並べてスクロールスナップ。スワイプで次の画面へ進む */
+  #deck{flex:1;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior-x:contain}
+  #deck::-webkit-scrollbar{display:none}
+  .scr{flex:0 0 100%;width:100%;overflow-y:auto;scroll-snap-align:start;scroll-snap-stop:always;padding:10px 10px 24px;overscroll-behavior-y:contain}
+  .scr>h2{font-size:17px;font-weight:700;margin:4px 4px 10px;display:flex;align-items:center;gap:8px}
+  .scr>h2 .n{font-family:var(--mono);color:var(--grn)}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;max-width:1100px;margin-left:auto;margin-right:auto}
+  .card h3{font-size:14px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .card h3 .sp{flex:1}
+  .card p,.card li{font-size:13px;line-height:1.6}
+  .note{font-size:12px;color:var(--dim);line-height:1.6}
+  .talk{border-left:3px solid var(--cyn);padding:6px 10px;background:var(--panel2);font-size:13px;color:var(--dim);border-radius:0 6px 6px 0;margin-bottom:8px}
+
+  .meta{font-family:var(--mono);font-size:11px;color:var(--dim);margin:4px 0 6px;line-height:1.5}
+  .meta .stale{color:var(--amb)}
+  .meta .off{color:var(--amb)}
+  .err{color:var(--amb);font-size:13px;padding:8px;border:1px dashed var(--amb);border-radius:6px;margin:6px 0}
+
+  .badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;font-family:var(--mono);padding:2px 8px;border-radius:10px;color:#0a1420;white-space:nowrap}
+  .badge.go{background:var(--grn)} .badge.caution{background:var(--amb)} .badge.nogo{background:var(--red)} .badge.none{background:var(--gry);color:var(--txt)}
+
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;flex-wrap:wrap}
+  .seg button{border:none;border-radius:0;border-right:1px solid var(--line);padding:5px 10px;font-size:12px}
+  .seg button:last-child{border-right:none}
+  .seg button.on{background:var(--line);color:var(--cyn)}
+
+  .fig{position:relative;background:#fff;border-radius:6px;overflow:hidden;cursor:zoom-in;min-height:60px}
+  .fig img{display:block;width:100%;height:auto}
+  .fig .hint{position:absolute;right:6px;bottom:6px;background:rgba(10,20,32,.75);color:var(--txt);font-size:11px;padding:2px 6px;border-radius:4px;pointer-events:none}
+  .loading{color:var(--dim);font-size:13px;padding:14px;text-align:center;background:var(--panel2)}
+
+  .map{height:58vh;min-height:300px;border-radius:6px;background:#0d1a29}
+  .map.sat{height:50vh}
+  /* 地理院の淡色地図を暗く反転してダーク表示に合わせる(重ねる気象タイルには掛けない) */
+  .basemap-dark{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9)}
+  .tbar{display:flex;align-items:center;gap:8px;margin:8px 0 2px;flex-wrap:wrap}
+  .tbar input[type=range]{flex:1;min-width:160px;accent-color:var(--cyn)}
+  .tlabel{font-family:var(--mono);font-size:13px;color:var(--cyn);min-width:14em}
+  .legend{display:flex;flex-wrap:wrap;gap:2px 8px;font-size:11px;font-family:var(--mono);color:var(--dim);margin-top:4px}
+  .legend i{display:inline-block;width:14px;height:10px;margin-right:3px;vertical-align:middle;border:1px solid rgba(255,255,255,.15)}
+  .chk{font-size:12px;display:inline-flex;align-items:center;gap:4px;color:var(--dim)}
+
+  table.t{width:100%;border-collapse:collapse;font-size:13px}
+  table.t th,table.t td{border-bottom:1px solid var(--line);padding:6px 6px;text-align:left;vertical-align:top}
+  table.t th{color:var(--dim);font-weight:500;font-size:11px}
+  table.t td.m{font-family:var(--mono)}
+  .wk{overflow-x:auto}
+  .wk table{min-width:560px}
+  .wk td,.wk th{text-align:center!important}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}
+  .row label{font-size:12px;color:var(--dim);min-width:7em}
+
+  footer{background:var(--panel);border-top:1px solid var(--line);padding:6px 10px calc(6px + env(safe-area-inset-bottom))}
+  .nav{display:flex;align-items:center;gap:8px}
+  .nav button{min-width:70px}
+  .nav .mid{flex:1;text-align:center;font-size:12px;color:var(--dim);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .disc{font-size:10px;color:var(--dim);text-align:center;margin-top:4px;line-height:1.4}
+
+  /* 全画面の図ビューア(ピンチズーム) */
+  #viewer{position:fixed;inset:0;background:rgba(5,10,16,.97);z-index:2000;display:none;flex-direction:column}
+  #viewer.show{display:flex}
+  #viewer .vh{display:flex;align-items:center;gap:8px;padding:calc(8px + env(safe-area-inset-top)) 12px 8px;border-bottom:1px solid var(--line)}
+  #viewer .vh span{flex:1;font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  #vwStage{flex:1;overflow:hidden;position:relative;touch-action:none}
+  #vwImg{position:absolute;left:0;top:0;transform-origin:0 0;background:#fff;max-width:none;user-select:none;-webkit-user-select:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">WX BRF</div>
+  <span id="net">ONLINE</span>
+  <div class="clocks"><span><b>JST</b><span id="cJst">--:--</span></span><span><b>UTC</b><span id="cUtc">--:--</span></span></div>
+</header>
+<nav class="tabs" id="tabs"></nav>
+<main id="deck"></main>
+<footer>
+  <div class="nav">
+    <button id="prev">◀ 前</button>
+    <div class="mid" id="navMid"></div>
+    <button id="next">次 ▶</button>
+  </div>
+  <div class="disc">予報官ブリーフィングの補助です。飛行可否の最終判断には使わないでください。図の多くは数値予報からの自動作成で、気象庁が発表する飛行場予報等と異なる場合があります。出典：気象庁・国土地理院 <span id="ver"></span></div>
+</footer>
+
+<div id="viewer">
+  <div class="vh"><span id="vwTitle"></span><button id="vwReset">等倍</button><button id="vwClose">閉じる ✕</button></div>
+  <div id="vwStage"><img id="vwImg" alt=""></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script type="module">
+/* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
+const VER_TAG='p1-1', BUILD='2026-09-17';
+const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
+const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+/* ───────── 保存(sandbox等で例外が出る環境向けに try/catch) ───────── */
+const store={
+  get(k){try{const v=localStorage.getItem(k);return v?JSON.parse(v):null}catch(e){return null}},
+  set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},
+  del(k){try{localStorage.removeItem(k)}catch(e){}}
+};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad=n=>String(n).padStart(2,'0');
+
+/* ───────── 時刻：内部はUTCのDate、表示はJSTとUTCを併記 ───────── */
+function jmaTime(s){ /* "20260917055500" (UTC) */
+  return new Date(Date.UTC(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8),+s.slice(8,10),+s.slice(10,12),+s.slice(12,14)||0));
+}
+function jst(d){const j=new Date(d.getTime()+9*3600e3);return {mo:j.getUTCMonth()+1,d:j.getUTCDate(),h:j.getUTCHours(),mi:j.getUTCMinutes(),wd:j.getUTCDay()}}
+function fJst(d){const j=jst(d);return `${pad(j.mo)}/${pad(j.d)} ${pad(j.h)}:${pad(j.mi)}`}
+function fZ(d){return `${pad(d.getUTCDate())}${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}Z`}
+function fBoth(d){return d?`${fJst(d)} JST (${fZ(d)})`:'—'}
+function fHm(d){const j=jst(d);return `${pad(j.h)}:${pad(j.mi)}`}
+function ago(d){const m=Math.round((Date.now()-d.getTime())/60000);if(m<60)return `${m}分前`;if(m<48*60)return `${Math.floor(m/60)}時間${m%60?m%60+'分':''}前`;return `${Math.floor(m/1440)}日前`}
+
+/* ───────── 取得：SWがオフライン時にキャッシュを返すと x-wx-offline が付く ───────── */
+async function getRes(url){
+  const res=await fetch(url,{cache:'no-cache',mode:'cors'});
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  const fetchedH=res.headers.get('x-wx-fetched');
+  return {
+    res,
+    offline:res.headers.get('x-wx-offline')==='1',
+    got:res.headers.get('x-wx-offline')==='1'&&fetchedH?new Date(fetchedH):new Date(),
+    lastModified:res.headers.get('last-modified')?new Date(res.headers.get('last-modified')):null
+  };
+}
+async function getJSON(url){const r=await getRes(url);r.data=await r.res.json();return r}
+
+/* ───────── データの状態(ホームに一覧、各図の下に1行) ───────── */
+const SRC=new Map();
+function setStatus(key,o){
+  const s=Object.assign(SRC.get(key)||{},o);SRC.set(key,s);
+  document.querySelectorAll(`[data-meta="${key}"]`).forEach(el=>el.innerHTML=metaHtml(s));
+  renderHomeStatus();
+}
+function isStale(s){return !!(s.pub&&s.staleMin&&(Date.now()-s.pub.getTime())/60000>s.staleMin)}
+function metaHtml(s){
+  if(s.err) return `<span class="stale">取得できませんでした（${esc(s.err)}）</span>`;
+  if(!s.label) return '';
+  if(!s.got) return '取得中…';
+  const parts=[];
+  if(s.pub) parts.push(`<span class="${isStale(s)?'stale':''}">${s.tag?`<b>${esc(s.label)}</b> `:''}${esc(s.pubLabel||'発表')} ${fBoth(s.pub)}${isStale(s)?' ・古いデータ':''}</span>`);
+  if(s.valid) parts.push(`対象 ${fBoth(s.valid)}`);
+  parts.push(`<span class="${s.offline?'off':''}">取得 ${fJst(s.got)}${s.offline?'（オフライン：前回取得分）':''}</span>`);
+  return parts.join('<br>');
+}
+function metaEl(key){return `<div class="meta" data-meta="${key}">${metaHtml(SRC.get(key)||{})}</div>`}
+function errBox(msg,page){return `<div class="err">取得できませんでした：${esc(msg)}${page?`<br><a href="${page}" target="_blank" rel="noopener">気象庁の元ページを開く ↗</a>`:''}</div>`}
+
+/* ───────── 画面定義(ブリーフィング順) ───────── */
+const SCREENS=[
+  {n:0,name:'ホーム'},
+  {n:1,name:'総観'},
+  {n:2,name:'レーダー実況'},
+  {n:3,name:'レーダー予想'},
+  {n:4,name:'経路',later:'フェーズ4'},
+  {n:5,name:'飛行場',later:'フェーズ2'},
+  {n:6,name:'鉛直構造',later:'フェーズ4'},
+  {n:7,name:'週間'},
+  {n:8,name:'まとめ',later:'フェーズ3'},
+];
+let SRCDEF=null;
+const loaded=new Set();
+let curIdx=0;
+
+function buildShell(){
+  $('#tabs').innerHTML=SCREENS.map((s,i)=>`<button data-i="${i}" class="${s.later?'later':''}"><span class="n">${s.n}</span>${s.name}</button>`).join('');
+  $('#deck').innerHTML=SCREENS.map((s,i)=>`<section class="scr" id="scr${s.n}" data-i="${i}"><h2><span class="n">${s.n}</span>${s.name}</h2><div class="body"></div></section>`).join('');
+  $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)goTo(+b.dataset.i)});
+  $('#prev').onclick=()=>goTo(curIdx-1);
+  $('#next').onclick=()=>goTo(curIdx+1);
+  let t=null;
+  $('#deck').addEventListener('scroll',()=>{clearTimeout(t);t=setTimeout(()=>{
+    const i=Math.round($('#deck').scrollLeft/$('#deck').clientWidth);if(i!==curIdx)activate(i)},90)},{passive:true});
+  window.addEventListener('resize',()=>{$('#deck').scrollLeft=curIdx*$('#deck').clientWidth});
+  for(const s of SCREENS) if(s.later) $(`#scr${s.n} .body`).innerHTML=laterHtml(s);
+}
+function goTo(i){
+  i=Math.max(0,Math.min(SCREENS.length-1,i));
+  $('#deck').scrollTo({left:i*$('#deck').clientWidth,behavior:'smooth'});
+  activate(i);
+}
+function activate(i){
+  curIdx=i;store.set('wx.screen',i);
+  document.querySelectorAll('#tabs button').forEach((b,j)=>b.classList.toggle('cur',j===i));
+  $('#tabs').children[i]?.scrollIntoView({inline:'nearest',block:'nearest'});
+  $('#prev').disabled=i===0;$('#next').disabled=i===SCREENS.length-1;
+  const nx=SCREENS[i+1];$('#navMid').textContent=nx?`次：${nx.n} ${nx.name}`:'最後の画面';
+  const s=SCREENS[i];
+  if(!loaded.has(s.n)&&LOADERS[s.n]){loaded.add(s.n);LOADERS[s.n]().catch(e=>console.error(e))}
+  setTimeout(()=>MAPS.forEach(m=>m.invalidateSize()),350);
+}
+function laterHtml(s){
+  return `<div class="card"><h3>${s.name}<span class="sp"></span><span class="badge none">データなし</span></h3>
+  <p class="note">この画面は${s.later}で作ります。${({
+    4:'下層悪天予想図（詳細版）、経路上の自動判定表、予報官の経路予報の写真添付欄。',
+    5:'METAR/TAFの原文と日本語デコード、横風成分、ミニマ判定。自衛隊飛行場のMETARは写真からテキスト認識でコピーして貼り付ける欄を設けます。',
+    6:'メテオグラム、自作の予報断面図、Skew-Tと安定度指数、公式の飛行場時系列予報。',
+    8:'各画面の話すポイントをつないだ読み上げ用のブリーフィング台本。'})[s.n]}</p></div>`;
+}
+
+/* ───────── 図：タップで全画面ビューア ───────── */
+function figHtml(id,title){return `<div class="fig" id="${id}" data-title="${esc(title)}"><div class="loading">読み込み中…</div></div>`}
+function setFigImg(id,src){
+  const el=document.getElementById(id);if(!el)return;
+  el.innerHTML=`<img src="${src}" alt="${el.dataset.title}"><span class="hint">タップで拡大</span>`;
+  el.onclick=()=>openViewer(src,el.dataset.title);
+}
+function setFigErr(id,msg,page){const el=document.getElementById(id);if(el){el.style.background='transparent';el.style.cursor='default';el.innerHTML=errBox(msg,page)}}
+
+const VW={s:1,x:0,y:0,pts:new Map(),start:null,lastTap:0};
+function openViewer(src,title){
+  $('#vwTitle').textContent=title||'';
+  const img=$('#vwImg');img.onload=()=>vwFit();img.src=src;
+  $('#viewer').classList.add('show');
+}
+function vwApply(){$('#vwImg').style.transform=`translate(${VW.x}px,${VW.y}px) scale(${VW.s})`}
+function vwFit(){
+  const st=$('#vwStage'),img=$('#vwImg');
+  const s=Math.min(st.clientWidth/img.naturalWidth,st.clientHeight/img.naturalHeight);
+  VW.fit=s;VW.s=s;VW.x=(st.clientWidth-img.naturalWidth*s)/2;VW.y=(st.clientHeight-img.naturalHeight*s)/2;vwApply();
+}
+function vwZoomAt(cx,cy,ns){
+  ns=Math.max(VW.fit*0.8,Math.min(VW.fit*12,ns));
+  VW.x=cx-(cx-VW.x)*ns/VW.s;VW.y=cy-(cy-VW.y)*ns/VW.s;VW.s=ns;vwApply();
+}
+function initViewer(){
+  const st=$('#vwStage');
+  $('#vwClose').onclick=()=>$('#viewer').classList.remove('show');
+  $('#vwReset').onclick=vwFit;
+  const rel=e=>{const r=st.getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top}};
+  st.addEventListener('pointerdown',e=>{
+    st.setPointerCapture(e.pointerId);VW.pts.set(e.pointerId,rel(e));
+    const now=Date.now();
+    if(VW.pts.size===1&&now-VW.lastTap<300){const p=rel(e);vwZoomAt(p.x,p.y,VW.s>VW.fit*1.5?VW.fit:VW.s*2.5)}
+    VW.lastTap=now;VW.start=null;
+  });
+  st.addEventListener('pointermove',e=>{
+    if(!VW.pts.has(e.pointerId))return;
+    const prev=VW.pts.get(e.pointerId),p=rel(e);VW.pts.set(e.pointerId,p);
+    if(VW.pts.size===1){VW.x+=p.x-prev.x;VW.y+=p.y-prev.y;vwApply()}
+    else if(VW.pts.size===2){
+      const [a,b]=[...VW.pts.values()];
+      const dist=Math.hypot(a.x-b.x,a.y-b.y),mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+      if(VW.start){vwZoomAt(mid.x,mid.y,VW.s*dist/VW.start.dist);VW.x+=mid.x-VW.start.mid.x;VW.y+=mid.y-VW.start.mid.y;vwApply()}
+      VW.start={dist,mid};
+    }
+  });
+  const up=e=>{VW.pts.delete(e.pointerId);VW.start=null};
+  st.addEventListener('pointerup',up);st.addEventListener('pointercancel',up);
+  st.addEventListener('wheel',e=>{e.preventDefault();const p=rel(e);vwZoomAt(p.x,p.y,VW.s*(e.deltaY<0?1.15:1/1.15))},{passive:false});
+}
+
+/* ───────── PDF → 画像(PDF.js)。フェーズ3でこの画像の上に見るべき点の印を重ねる ───────── */
+let pdfjsP=null;
+function pdfjs(){
+  if(!pdfjsP) pdfjsP=import(PDFJS+'pdf.min.mjs').then(m=>{m.GlobalWorkerOptions.workerSrc=PDFJS+'pdf.worker.min.mjs';return m});
+  return pdfjsP;
+}
+async function pdfToImages(buf,{maxPages=2,width=2200}={}){
+  const lib=await pdfjs();
+  /* ⚠ PDF.js 6 では doc.destroy() が無い。読み込みタスクの destroy() で後始末する */
+  const task=lib.getDocument({data:buf,cMapUrl:PDFJS+'cmaps/',cMapPacked:true,standardFontDataUrl:PDFJS+'standard_fonts/',wasmUrl:PDFJS+'wasm/'});
+  const doc=await task.promise;
+  const out=[];
+  for(let i=1;i<=Math.min(doc.numPages,maxPages);i++){
+    const page=await doc.getPage(i);
+    const v1=page.getViewport({scale:1});
+    const vp=page.getViewport({scale:width/v1.width});
+    const cv=document.createElement('canvas');cv.width=Math.round(vp.width);cv.height=Math.round(vp.height);
+    const ctx=cv.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);
+    await page.render({canvas:cv,canvasContext:ctx,viewport:vp}).promise;
+    const blob=await new Promise(r=>cv.toBlob(r,'image/png'));
+    out.push(URL.createObjectURL(blob));
+    page.cleanup();
+  }
+  const n=doc.numPages;task.destroy();
+  return {imgs:out,numPages:n};
+}
+
+/* ───────── 地図(Leaflet)：レーダー2枚・衛星1枚で表示位置を共有 ───────── */
+const MAPS=[];
+const VIEW=store.get('wx.view')||{c:[35.9,139.5],z:8};
+function makeMap(el,{maxZoom=14}={}){
+  const m=L.map(el,{zoomControl:true,attributionControl:true,maxZoom,minZoom:4}).setView(VIEW.c,Math.min(VIEW.z,maxZoom));
+  L.tileLayer(SRCDEF.baseMap.tile,{maxNativeZoom:SRCDEF.baseMap.maxNativeZoom,maxZoom,className:'basemap-dark',crossOrigin:true,
+    attribution:`<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">${SRCDEF.baseMap.attribution}</a>｜気象庁`}).addTo(m);
+  m.on('moveend',()=>{const c=m.getCenter();VIEW.c=[+c.lat.toFixed(4),+c.lng.toFixed(4)];VIEW.z=m.getZoom();store.set('wx.view',VIEW)});
+  MAPS.push(m);
+  return m;
+}
+/* 時刻ごとのタイル層。新しい時刻の層が読み終わってから前の層を消す(ちらつき防止)。
+   ⚠ 層を全部残すとパンのたびに全時刻ぶんのタイルを取りにいくので、現在と直前の2枚だけ持つ */
+class TimeLayer{
+  constructor(map,{opacity=.8,maxNativeZoom=10,zIndex=10}={}){Object.assign(this,{map,opacity,maxNativeZoom,zIndex});this.layers=new Map();this.cur=null}
+  show(key,url){
+    if(this.cur===key)return;
+    const prev=this.cur;this.cur=key;
+    let l=this.layers.get(key);
+    if(!l){
+      l=L.tileLayer(url,{opacity:0,maxNativeZoom:this.maxNativeZoom,maxZoom:18,crossOrigin:true,errorTileUrl:BLANK,zIndex:this.zIndex});
+      l._ok=false;
+      const done=()=>{l._ok=true;if(this.cur===key)this._swap()};
+      l.once('load',done);setTimeout(done,2500);
+      this.layers.set(key,l);l.addTo(this.map);
+    }
+    if(l._ok||prev==null) this._swap();
+  }
+  _swap(){
+    for(const [k,l] of this.layers){
+      if(k===this.cur) l.setOpacity(this.opacity);
+      else {this.map.removeLayer(l);this.layers.delete(k)}
+    }
+  }
+  hide(){for(const l of this.layers.values())this.map.removeLayer(l);this.layers.clear();this.cur=null}
+}
+function fillTile(tpl,o){return tpl.replace(/\{(base|basetime|validtime|element|band|member)\}/g,(_,k)=>k==='base'?SRCDEF.jmatile:o[k])}
+
+const RAIN_LEGEND=[['#f2f2ff','<1'],['#a0d2ff','1'],['#218cff','5'],['#0041ff','10'],['#faf500','20'],['#ff9900','30'],['#ff2800','50'],['#b40068','80+']];
+const THUNDER_LEGEND=[['#ffff00','1 可能性'],['#ffaa00','2 あり'],['#ff4400','3 やや激しい'],['#c800ff','4 激しい']];
+function legendHtml(list,unit){return `<div class="legend">${list.map(([c,t])=>`<span><i style="background:${c}"></i>${t}</span>`).join('')}${unit?`<span>${unit}</span>`:''}</div>`}
+
+/* スライダーで時刻を選ぶ。▶で順に再生 */
+function timeBar(root,items,onPick,{startIdx}={}){
+  root.innerHTML=`<div class="tbar"><button class="play">▶</button><input type="range" min="0" max="${items.length-1}" value="${startIdx??items.length-1}"><span class="tlabel"></span></div>`;
+  const rng=root.querySelector('input'),lab=root.querySelector('.tlabel'),btn=root.querySelector('.play');
+  const pick=()=>{const it=items[+rng.value];lab.textContent=it.label;onPick(it)};
+  rng.oninput=pick;
+  let timer=null;
+  btn.onclick=()=>{
+    if(timer){clearInterval(timer);timer=null;btn.textContent='▶';return}
+    btn.textContent='❚❚';
+    timer=setInterval(()=>{rng.value=(+rng.value+1)%items.length;pick()},900);
+  };
+  pick();
+}
+
+/* ═════════ 0 ホーム ═════════ */
+const JUDGE_ROWS=[
+  {n:1,name:'総観',note:'判定なし（解説のみ）'},
+  {n:2,name:'レーダー実況',note:'経路周辺の降水・雷（フェーズ4で経路と重ねて判定）'},
+  {n:3,name:'レーダー予想',note:'飛行時間帯の降水予想（フェーズ4）'},
+  {n:4,name:'経路',note:'区間ごと（フェーズ4）'},
+  {n:5,name:'飛行場',note:'METAR/TAFとミニマ（フェーズ2）'},
+  {n:6,name:'鉛直構造',note:'時間帯・安定度（フェーズ4）'},
+  {n:7,name:'週間',note:'判定なし'},
+];
+async function loadHome(){
+  const b=$('#scr0 .body');
+  const cfg=store.get('wx.cfg')||{};
+  b.innerHTML=`
+  <div class="card">
+    <h3>対象<span class="sp"></span><span class="badge none">総合：データなし</span></h3>
+    <div class="row"><label>飛行予定（JST）</label><input type="datetime-local" id="cfgWhen" value="${esc(cfg.when||'')}"></div>
+    <div class="row"><label>飛行場（ICAO）</label><input id="cfgAd" placeholder="例 RJTT RJTF" value="${esc(cfg.ad||'')}" style="width:14em;text-transform:uppercase"></div>
+    <div class="row"><label>府県予報区</label><select id="cfgOffice"><option>読み込み中…</option></select></div>
+    <p class="note">設定はこの端末の中だけに保存します。飛行場は画面5（フェーズ2）の判定で使います。</p>
+  </div>
+  <div class="card">
+    <h3>AI 3行要約<span class="sp"></span><span class="badge none">未実装</span></h3>
+    <p class="note">フェーズ3で、公式の解説文と判定結果をもとにした3行要約を表示します。AIによる参考解説で、予報官ブリーフィングを優先します。</p>
+  </div>
+  <div class="card">
+    <h3>各画面の判定</h3>
+    <table class="t">${JUDGE_ROWS.map(r=>`<tr><td class="m" style="width:2em">${r.n}</td><td><a href="#" data-go="${r.n}">${r.name}</a><div class="note">${r.note}</div></td><td style="text-align:right"><span class="badge none">データなし</span></td></tr>`).join('')}</table>
+  </div>
+  <div class="card">
+    <h3>データの状態<span class="sp"></span><button id="btnReload">すべて取り直す</button></h3>
+    <div id="homeStatus" class="note">まだ取得していません。各画面を開くと取得します。</div>
+  </div>
+  <div class="card">
+    <h3>外部との通信</h3>
+    <p class="note">このアプリは気象庁・国土地理院・CDN（cdnjs、Google Fonts）からデータを<b>取得するだけ</b>で、飛行場・経路・位置・設定はどこにも送りません。AI解説（フェーズ3）とMETAR/TAF（フェーズ2）を追加するときに、送る内容をここに一覧で出します。</p>
+  </div>`;
+  b.querySelectorAll('[data-go]').forEach(a=>a.onclick=e=>{e.preventDefault();goTo(SCREENS.findIndex(s=>s.n===+a.dataset.go))});
+  const save=()=>{store.set('wx.cfg',{when:$('#cfgWhen').value,ad:$('#cfgAd').value.toUpperCase().trim(),office:$('#cfgOffice').value})};
+  $('#cfgWhen').onchange=save;$('#cfgAd').onchange=save;
+  $('#cfgOffice').onchange=()=>{save();loaded.delete(7)};
+  $('#btnReload').onclick=()=>{
+    const keep=SCREENS[curIdx].n;
+    for(const n of [...loaded]) if(n!==0) loaded.delete(n);
+    for(const n of [1,2,3,7]) $(`#scr${n} .body`).innerHTML='';
+    MAPS.forEach(m=>m.remove());MAPS.length=0;SRC.clear();renderHomeStatus();
+    if(keep!==0){loaded.delete(keep);activate(curIdx)}
+  };
+  renderHomeStatus();
+  try{
+    const {data}=await getJSON(SRCDEF.weekly.areaList);
+    const sel=$('#cfgOffice'),cur=cfg.office||'130000';
+    sel.innerHTML=Object.entries(data.centers).map(([,c])=>`<optgroup label="${esc(c.name)}">${c.children.map(code=>`<option value="${code}" ${code===cur?'selected':''}>${esc(data.offices[code]?.name||code)}</option>`).join('')}</optgroup>`).join('');
+    if(!cfg.office) save();
+  }catch(e){$('#cfgOffice').innerHTML='<option value="130000">東京都（一覧を取得できませんでした）</option>'}
+}
+function renderHomeStatus(){
+  const el=$('#homeStatus');if(!el)return;
+  if(!SRC.size){el.textContent='まだ取得していません。各画面を開くと取得します。';return}
+  el.innerHTML=`<table class="t">${[...SRC.entries()].map(([k,s])=>{
+    const st=s.err?'<span class="badge caution">失敗</span>':!s.got?'<span class="badge none">取得中</span>':s.offline?'<span class="badge caution">前回分</span>':isStale(s)?'<span class="badge caution">古い</span>':'<span class="badge go">最新</span>';
+    return `<tr><td>${esc(s.label||k)}<div class="meta">${s.pub?`${esc(s.pubLabel||'発表')} ${fBoth(s.pub)}（${ago(s.pub)}）`:''}</div></td><td style="text-align:right">${st}</td></tr>`}).join('')}</table>`;
+}
+
+/* ═════════ 1 総観 ═════════ */
+async function loadSynoptic(){
+  const b=$('#scr1 .body');
+  const charts=SRCDEF.nwpPdf.charts;
+  b.innerHTML=`
+  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  <div class="card">
+    <h3>地上天気図<span class="sp"></span><span class="seg" id="wmSeg"><button data-k="now" class="on">実況</button><button data-k="ft24">24h予想</button><button data-k="ft48">48h予想</button></span></h3>
+    ${metaEl('wm')}
+    ${figHtml('figWm','地上天気図')}
+  </div>
+  ${charts.map(c=>`<div class="card"><h3>${esc(c.name)}</h3>${metaEl('nwp_'+c.id)}<div id="nwp_${c.id}">${figHtml('fig_'+c.id,c.name)}</div></div>`).join('')}
+  <div class="card">
+    <h3>ひまわり（日本域）<span class="sp"></span><span class="seg" id="satSeg">${SRCDEF.himawari.bands.map((x,i)=>`<button data-b="${x.id}" class="${i===0?'on':''}">${x.name}</button>`).join('')}</span></h3>
+    ${metaEl('sat')}
+    <div class="map sat" id="mapSat"></div>
+    <div id="satBar"></div>
+    <p class="note">水蒸気画像は暗い域（乾燥域）の縁でトラフの位置を確認するのに使います。</p>
+  </div>
+  <div class="card">
+    <h3>全国航空気象解説報（国内空域）</h3>
+    ${metaEl('avcmt')}
+    ${figHtml('figAvCmt','全国航空気象解説報（国内空域）')}
+    <p class="note"><a href="${SRCDEF.commentary.aviationPage}" target="_blank" rel="noopener">航空気象情報の元ページ ↗</a></p>
+  </div>
+  <div class="card">
+    <h3>短期予報解説資料<span class="sp"></span><button id="btnTanki">表示する</button></h3>
+    ${metaEl('tanki')}
+    <div id="tankiBox"><p class="note">PDF（数ページ）。フェーズ3でAI解説の主な入力にします。</p></div>
+  </div>
+  <div class="card">
+    <h3>AIの総合解析<span class="sp"></span><span class="badge none">未実装</span></h3>
+    <p class="note">フェーズ3：高層解析チェックリスト（トラフ・正渦度域・寒気・湿数・前線）に沿って、図の上に見るべき点の印を重ねて解説します。</p>
+  </div>`;
+
+  loadWeatherMap();
+  $('#wmSeg').onclick=e=>{const x=e.target.closest('button');if(!x)return;$('#wmSeg').querySelectorAll('button').forEach(y=>y.classList.toggle('on',y===x));loadWeatherMap(x.dataset.k)};
+  loadSat();
+  setStatus('avcmt',{label:'全国航空気象解説報',staleMin:SRCDEF.commentary.staleMin,pubLabel:'更新'});
+  getRes(SRCDEF.commentary.aviationAirspace).then(async r=>{
+    setFigImg('figAvCmt',URL.createObjectURL(await r.res.blob()));
+    setStatus('avcmt',{pub:r.lastModified,got:r.got,offline:r.offline});
+  }).catch(e=>{setFigErr('figAvCmt',e.message,SRCDEF.commentary.aviationPage);setStatus('avcmt',{err:e.message})});
+  $('#btnTanki').onclick=()=>loadPdfInto('tanki','短期予報解説資料',SRCDEF.commentary.tankiPdf,'tankiBox',{maxPages:6,width:1400,staleMin:SRCDEF.commentary.staleMin});
+  for(const c of charts) await loadNwpChart(c); /* PDFの描画は重いので1枚ずつ */
+}
+async function loadWeatherMap(kind='now'){
+  const key='wm';
+  setStatus(key,{label:'地上天気図',got:null,err:null});
+  try{
+    const r=await getJSON(SRCDEF.weatherMap.list);
+    const list=r.data.near?.[kind]||[];
+    const file=list[list.length-1];
+    if(!file) throw new Error('一覧が空です');
+    /* 例 20260917051030_0_Z__C_010000_20260917030000_MET_CHT_JCIspas_... = 作成時刻_…_初期時刻 */
+    const m=file.match(/^(\d{14})_0_Z__C_\d+_(\d{14})_/);
+    const made=m?jmaTime(m[1]):null, base=m?jmaTime(m[2]):null;
+    const hrs=kind==='ft24'?24:kind==='ft48'?48:0;
+    const img=await getRes(SRCDEF.weatherMap.image.replace('{file}',file));
+    setFigImg('figWm',URL.createObjectURL(await img.res.blob()));
+    document.getElementById('figWm').dataset.title=`地上天気図 ${kind==='now'?'実況':hrs+'h予想'}`;
+    setStatus(key,{pub:made,pubLabel:'発表',valid:base?new Date(base.getTime()+hrs*3600e3):null,got:img.got,offline:img.offline||r.offline,staleMin:SRCDEF.weatherMap.staleMin[kind]});
+  }catch(e){setFigErr('figWm',e.message,SRCDEF.weatherMap.page);setStatus(key,{err:e.message})}
+}
+async function loadNwpChart(c){
+  const key='nwp_'+c.id, P=SRCDEF.nwpPdf;
+  setStatus(key,{label:c.name.split(' ')[0],staleMin:P.staleMin,pubLabel:'更新'});
+  try{
+    /* 00UTC版と12UTC版のうち新しい方(更新日時で比べる) */
+    const cands=await Promise.allSettled(c.hh.map(hh=>getRes(P.url.replace('{id}',c.id).replace('{hh}',hh)).then(r=>Object.assign(r,{hh}))));
+    const ok=cands.filter(x=>x.status==='fulfilled').map(x=>x.value).sort((a,b)=>(b.lastModified?.getTime()||0)-(a.lastModified?.getTime()||0));
+    if(!ok.length) throw new Error(cands[0].reason?.message||'取得失敗');
+    const r=ok[0];
+    const buf=await r.res.arrayBuffer();
+    const {imgs}=await pdfToImages(buf,{maxPages:2});
+    const wrap=document.getElementById('nwp_'+c.id);
+    wrap.innerHTML=imgs.map((u,i)=>figHtml(`fig_${c.id}_${i}`,`${c.name}（${r.hh}UTC）`)).join('<div style="height:6px"></div>');
+    imgs.forEach((u,i)=>setFigImg(`fig_${c.id}_${i}`,u));
+    setStatus(key,{pub:r.lastModified,got:r.got,offline:r.offline,label:`${c.name.split(' ')[0]}（${r.hh}UTC）`});
+  }catch(e){setFigErr('fig_'+c.id,e.message,P.page);setStatus(key,{err:e.message})}
+}
+async function loadPdfInto(key,label,url,boxId,{maxPages,width,staleMin}){
+  const box=document.getElementById(boxId);box.innerHTML='<div class="loading">読み込み中…</div>';
+  setStatus(key,{label,staleMin,pubLabel:'更新',got:null,err:null});
+  try{
+    const r=await getRes(url);
+    const {imgs,numPages}=await pdfToImages(await r.res.arrayBuffer(),{maxPages,width});
+    box.innerHTML=imgs.map((u,i)=>figHtml(`${boxId}_${i}`,`${label} ${i+1}/${numPages}`)).join('<div style="height:6px"></div>')
+      +(numPages>maxPages?`<p class="note">全${numPages}ページのうち${maxPages}ページを表示。<a href="${url}" target="_blank" rel="noopener">PDFを開く ↗</a></p>`:'');
+    imgs.forEach((u,i)=>setFigImg(`${boxId}_${i}`,u));
+    setStatus(key,{pub:r.lastModified,got:r.got,offline:r.offline});
+  }catch(e){box.innerHTML=errBox(e.message,url);setStatus(key,{err:e.message})}
+}
+async function loadSat(){
+  const H=SRCDEF.himawari;
+  setStatus('sat',{label:'ひまわり',staleMin:H.staleMin,pubLabel:'観測'});
+  const map=makeMap('mapSat',{maxZoom:9});
+  const tl=new TimeLayer(map,{opacity:.85,maxNativeZoom:H.maxNativeZoom});
+  let band=H.bands[0].id,items=[],curItem=null;
+  const show=it=>{curItem=it;tl.show(band+it.basetime,fillTile(H.tile,{basetime:it.basetime,validtime:it.validtime,band}))};
+  $('#satSeg').onclick=e=>{const x=e.target.closest('button');if(!x)return;$('#satSeg').querySelectorAll('button').forEach(y=>y.classList.toggle('on',y===x));band=x.dataset.b;if(curItem)show(curItem)};
+  try{
+    const r=await getJSON(H.times);
+    items=r.data.slice(-12).map(t=>({...t,label:`${fBoth(jmaTime(t.validtime))}`}));
+    const last=items[items.length-1];
+    setStatus('sat',{pub:jmaTime(last.validtime),got:r.got,offline:r.offline});
+    timeBar($('#satBar'),items,show);
+  }catch(e){$('#satBar').innerHTML=errBox(e.message,H.page);setStatus('sat',{err:e.message})}
+}
+
+/* ═════════ 2 レーダー実況 ═════════ */
+async function loadRadarNow(){
+  const b=$('#scr2 .body'),N=SRCDEF.nowcast;
+  b.innerHTML=`
+  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  <div class="card">
+    <h3>降水ナウキャスト（実況・直近1時間）<span class="sp"></span><span class="badge none">判定：フェーズ4</span></h3>
+    ${metaEl('nowc')}
+    <div class="map" id="mapNow"></div>
+    <div id="nowBar"></div>
+    <div class="row"><label class="chk"><input type="checkbox" id="chkThN" checked>雷ナウキャスト（活動度）</label><label class="chk"><input type="checkbox" id="chkLiden" checked>雷の検知（実況）</label></div>
+    ${legendHtml(RAIN_LEGEND,'mm/h')}
+    ${legendHtml(THUNDER_LEGEND,'雷活動度')}
+    ${metaEl('thunder')}
+    <p class="note">経路ラインの重ね表示と、経路周辺の降水・雷の判定はフェーズ4で追加します。<a href="${N.page}" target="_blank" rel="noopener">気象庁 雨雲の動き ↗</a></p>
+  </div>`;
+  const map=makeMap('mapNow');
+  const rain=new TimeLayer(map,{opacity:.75,maxNativeZoom:N.maxNativeZoom,zIndex:10});
+  setStatus('nowc',{label:'降水ナウキャスト',tag:1,staleMin:N.staleMin,pubLabel:'観測'});
+  try{
+    const r=await getJSON(N.timesPast);
+    const items=r.data.filter(t=>t.elements.includes('hrpns')).sort((a,b)=>a.validtime.localeCompare(b.validtime)).slice(-13)
+      .map(t=>({...t,label:fBoth(jmaTime(t.validtime))}));
+    setStatus('nowc',{pub:jmaTime(items[items.length-1].validtime),got:r.got,offline:r.offline});
+    timeBar($('#nowBar'),items,it=>rain.show(it.validtime,fillTile(N.tile,{basetime:it.basetime,validtime:it.validtime,element:'hrpns'})));
+  }catch(e){$('#nowBar').innerHTML=errBox(e.message,N.page);setStatus('nowc',{err:e.message})}
+
+  /* 雷：活動度タイル(最新の初期時刻で一番近い時刻)と、検知点のGeoJSON */
+  setStatus('thunder',{label:'雷ナウキャスト',tag:1,staleMin:N.staleMin,pubLabel:'初期'});
+  const th=new TimeLayer(map,{opacity:.9,maxNativeZoom:N.maxNativeZoom,zIndex:20});
+  let lidenLayer=null;
+  try{
+    const r=await getJSON(N.timesThunder);
+    const thns=r.data.filter(t=>t.elements.includes('thns'));
+    const latestB=thns.map(t=>t.basetime).sort().pop();
+    const nowT=thns.filter(t=>t.basetime===latestB).sort((a,b)=>a.validtime.localeCompare(b.validtime))[0];
+    const lid=r.data.filter(t=>t.elements.includes('liden')).sort((a,b)=>a.validtime.localeCompare(b.validtime)).pop();
+    setStatus('thunder',{pub:nowT?jmaTime(nowT.basetime):null,got:r.got,offline:r.offline});
+    const applyTh=()=>{ if($('#chkThN').checked&&nowT) th.show(nowT.validtime,fillTile(N.tile,{basetime:nowT.basetime,validtime:nowT.validtime,element:'thns'})); else th.hide() };
+    $('#chkThN').onchange=applyTh;applyTh();
+    if(lid){
+      const g=await getJSON(fillTile(N.geojson,{basetime:lid.basetime,validtime:lid.validtime,element:'liden'}));
+      lidenLayer=L.geoJSON(g.data,{pointToLayer:(f,ll)=>L.circleMarker(ll,{radius:5,color:'#fff',weight:1,fillColor:'#ffff00',fillOpacity:.95})});
+      const applyL=()=>{if($('#chkLiden').checked)lidenLayer.addTo(map);else map.removeLayer(lidenLayer)};
+      $('#chkLiden').onchange=applyL;applyL();
+    }
+  }catch(e){setStatus('thunder',{err:e.message})}
+}
+
+/* ═════════ 3 レーダー予想 ═════════ */
+async function loadRadarFcst(){
+  const b=$('#scr3 .body'),N=SRCDEF.nowcast,R=SRCDEF.rasrf;
+  b.innerHTML=`
+  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  <div class="card">
+    <h3>降水の予想（1時間先まで5分毎 → 15時間先まで1時間毎）<span class="sp"></span><span class="badge none">判定：フェーズ4</span></h3>
+    ${metaEl('nowcF')}${metaEl('rasrf')}
+    <div class="map" id="mapFc"></div>
+    <div id="fcBar"></div>
+    <div class="row"><label class="chk"><input type="checkbox" id="chkThF" checked>雷ナウキャスト（1時間先まで）</label></div>
+    ${legendHtml(RAIN_LEGEND,'mm/h')}
+    <p class="note">1時間先までは高解像度降水ナウキャスト、それより先は降水短時間予報（1時間雨量）です。<a href="${R.page}" target="_blank" rel="noopener">気象庁 今後の雨 ↗</a></p>
+  </div>`;
+  const map=makeMap('mapFc');
+  const rain=new TimeLayer(map,{opacity:.75,maxNativeZoom:N.maxNativeZoom,zIndex:10});
+  const th=new TimeLayer(map,{opacity:.9,maxNativeZoom:N.maxNativeZoom,zIndex:20});
+  setStatus('nowcF',{label:'ナウキャスト予想',tag:1,staleMin:N.staleMin,pubLabel:'初期'});
+  setStatus('rasrf',{label:'降水短時間予報',tag:1,staleMin:R.staleMin,pubLabel:'初期'});
+  const items=[];let thns=[];
+  const rel=(v,b0)=>{const m=Math.round((jmaTime(v)-jmaTime(b0))/60000);return m<60?`+${m}分`:`+${Math.floor(m/60)}時間${m%60?m%60+'分':''}`};
+  try{
+    const r=await getJSON(N.timesFcst);
+    const b0=r.data.map(t=>t.basetime).sort().pop();
+    r.data.filter(t=>t.basetime===b0&&t.validtime>t.basetime&&t.elements.includes('hrpns')).sort((a,b)=>a.validtime.localeCompare(b.validtime))
+      .forEach(t=>items.push({...t,kind:'n',label:`${rel(t.validtime,b0)} ${fBoth(jmaTime(t.validtime))} ナウキャスト`}));
+    setStatus('nowcF',{pub:jmaTime(b0),got:r.got,offline:r.offline});
+  }catch(e){setStatus('nowcF',{err:e.message})}
+  try{
+    const r=await getJSON(R.times);
+    /* ⚠ 一覧には速報版(immed：10分毎に6時間先まで)と通常版(none：30分毎に15時間先まで)が混ざり、
+       none には予想の無い実況だけの時刻や別要素(sjfcstmap)も入る。予想時刻を持つ初期時刻だけを候補にする */
+    const fc=r.data.filter(t=>t.elements.includes('rasrf')&&t.validtime>t.basetime);
+    const latest=m=>fc.filter(t=>t.member===m).map(t=>t.basetime).sort().pop();
+    let lastV=items.length?items[items.length-1].validtime:'0',b0=null;
+    for(const m of ['immed','none']){
+      const b=latest(m);if(!b)continue;
+      if(!b0||b>b0)b0=b;
+      fc.filter(t=>t.member===m&&t.basetime===b&&t.validtime>lastV).sort((a,b)=>a.validtime.localeCompare(b.validtime))
+        .forEach(t=>items.push({...t,kind:'r',label:`${rel(t.validtime,items[0]?.basetime||b)} ${fBoth(jmaTime(t.validtime))} 短時間予報${m==='immed'?'（速報）':''}`}));
+      lastV=items.length?items[items.length-1].validtime:lastV;
+    }
+    if(!b0) throw new Error('予想の時刻がありません');
+    setStatus('rasrf',{pub:jmaTime(b0),got:r.got,offline:r.offline});
+  }catch(e){setStatus('rasrf',{err:e.message})}
+  try{
+    const r=await getJSON(N.timesThunder);
+    const t0=r.data.filter(t=>t.elements.includes('thns'));
+    const b0=t0.map(t=>t.basetime).sort().pop();
+    thns=t0.filter(t=>t.basetime===b0);
+  }catch(e){}
+  if(!items.length){$('#fcBar').innerHTML=errBox('予想の時刻一覧を取得できませんでした',N.page);return}
+  let cur=null;
+  const applyTh=()=>{
+    const it=cur;const m=it&&it.kind==='n'&&$('#chkThF').checked&&thns.filter(t=>t.validtime<=it.validtime).sort((a,b)=>a.validtime.localeCompare(b.validtime)).pop();
+    if(m) th.show(m.validtime,fillTile(N.tile,{basetime:m.basetime,validtime:m.validtime,element:'thns'})); else th.hide();
+  };
+  $('#chkThF').onchange=applyTh;
+  timeBar($('#fcBar'),items,it=>{
+    cur=it;
+    rain.maxNativeZoom=it.kind==='n'?N.maxNativeZoom:R.maxNativeZoom;
+    rain.show(it.kind+it.validtime,it.kind==='n'
+      ?fillTile(N.tile,{basetime:it.basetime,validtime:it.validtime,element:'hrpns'})
+      :fillTile(R.tile,{basetime:it.basetime,validtime:it.validtime,member:it.member}));
+    applyTh();
+  },{startIdx:0});
+}
+
+/* ═════════ 7 週間 ═════════ */
+/* 天気コード→文言(よく出るもの)。無いコードは先頭の数字で大分類 */
+const TELOP={100:'晴れ',101:'晴時々曇',102:'晴一時雨',103:'晴時々雨',104:'晴一時雪',110:'晴後時々曇',111:'晴後曇',112:'晴後一時雨',113:'晴後時々雨',114:'晴後雨',115:'晴後一時雪',
+  200:'曇り',201:'曇時々晴',202:'曇一時雨',203:'曇時々雨',204:'曇一時雪',210:'曇後時々晴',211:'曇後晴',212:'曇後一時雨',213:'曇後時々雨',214:'曇後雨',215:'曇後一時雪',
+  300:'雨',301:'雨時々晴',302:'雨時々止む',303:'雨時々雪',308:'暴風雨',311:'雨後晴',313:'雨後曇',314:'雨後時々雪',
+  400:'雪',401:'雪時々晴',402:'雪時々止む',403:'雪時々雨',405:'大雪',406:'風雪強い',407:'暴風雪',411:'雪後晴',413:'雪後曇',414:'雪後雨'};
+const telop=c=>TELOP[c]||({1:'晴れ系',2:'曇り系',3:'雨系',4:'雪系'})[String(c)[0]]||`コード${c}`;
+const ICON=c=>({1:'☀️',2:'☁️',3:'☔',4:'❄️'})[String(c)[0]]||'';
+const WD=['日','月','火','水','木','金','土'];
+
+async function loadWeekly(){
+  const b=$('#scr7 .body'),W=SRCDEF.weekly;
+  const office=(store.get('wx.cfg')||{}).office||'130000';
+  b.innerHTML=`
+  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  <div class="card"><h3>府県天気予報（今日・明日）</h3>${metaEl('fc')}<div id="fcShort" class="loading">読み込み中…</div></div>
+  <div class="card"><h3>週間天気予報</h3>${metaEl('wk')}<div id="fcWeek" class="wk loading">読み込み中…</div>
+    <p class="note">府県予報区はホーム画面で変えられます。信頼度 A＞B＞C。</p></div>
+  <div class="card"><h3>${esc(W.supportName)}</h3>${metaEl('feas')}<div id="feasBox">${figHtml('figFeas',W.supportName)}</div>
+    <p class="note">どの週間予報支援図を使うかは未決事項です（FXXN519は廃止）。</p></div>
+  <div class="card"><h3>週間予報解説資料<span class="sp"></span><button id="btnShukan">表示する</button></h3>${metaEl('shukan')}<div id="shukanBox"><p class="note">PDF。フェーズ3でAI解説の入力にします。</p></div></div>
+  <div class="card"><h3>AI解説<span class="sp"></span><span class="badge none">未実装</span></h3><p class="note">フェーズ3で表示します。</p></div>`;
+  $('#btnShukan').onclick=()=>loadPdfInto('shukan','週間予報解説資料',SRCDEF.commentary.shukanPdf,'shukanBox',{maxPages:6,width:1400,staleMin:SRCDEF.commentary.staleMin});
+
+  setStatus('fc',{label:'府県天気予報',staleMin:W.staleMin,pubLabel:'発表'});
+  setStatus('wk',{label:'週間天気予報',staleMin:W.staleMin,pubLabel:'発表'});
+  try{
+    const r=await getJSON(W.forecast.replace('{office}',office));
+    const [short,week]=r.data;
+    /* 今日・明日：天気と風(ヘリ運航では風の文言を必ず見る) */
+    const ts=short.timeSeries[0];
+    $('#fcShort').className='';
+    $('#fcShort').innerHTML=`<div class="note" style="margin-bottom:4px">${esc(short.publishingOffice)}</div>`+ts.areas.map(a=>`
+      <div style="margin:8px 0"><b style="font-size:13px">${esc(a.area.name)}</b>
+      <table class="t">${ts.timeDefines.map((t,i)=>{const d=new Date(t),j=jst(d);return `<tr><td class="m" style="width:5.5em">${j.mo}/${j.d}(${WD[j.wd]})</td><td>${ICON(a.weatherCodes?.[i])} ${esc(a.weathers?.[i]||telop(a.weatherCodes?.[i]))}${a.winds?.[i]?`<div class="note">風：${esc(a.winds[i])}</div>`:''}${a.waves?.[i]?`<div class="note">波：${esc(a.waves[i])}</div>`:''}</td></tr>`}).join('')}</table></div>`).join('');
+    setStatus('fc',{pub:new Date(short.reportDatetime),got:r.got,offline:r.offline});
+
+    if(week){
+      const w0=week.timeSeries[0],w1=week.timeSeries[1];
+      const days=w0.timeDefines.map(t=>{const j=jst(new Date(t));return `${j.mo}/${j.d}<br>(${WD[j.wd]})`});
+      $('#fcWeek').className='wk';
+      $('#fcWeek').innerHTML=w0.areas.map((a,ai)=>{
+        const tp=w1?.areas?.[ai]||w1?.areas?.[0];
+        return `<b style="font-size:13px">${esc(a.area.name)}</b><table class="t"><tr><th></th>${days.map(d=>`<th>${d}</th>`).join('')}</tr>
+        <tr><th>天気</th>${a.weatherCodes.map(c=>`<td>${ICON(c)}<div class="note">${esc(telop(c))}</div></td>`).join('')}</tr>
+        <tr><th>降水確率</th>${a.pops.map(p=>`<td class="m">${p===''?'—':p+'%'}</td>`).join('')}</tr>
+        <tr><th>信頼度</th>${(a.reliabilities||[]).map(x=>`<td class="m">${x||'—'}</td>`).join('')}</tr>
+        ${tp?`<tr><th>最高/最低<br><span class="note">${esc(tp.area.name)}</span></th>${days.map((_,i)=>`<td class="m">${tp.tempsMax?.[i]||'—'}/${tp.tempsMin?.[i]||'—'}</td>`).join('')}</tr>`:''}
+        </table>`}).join('');
+      setStatus('wk',{pub:new Date(week.reportDatetime),got:r.got,offline:r.offline});
+    }
+  }catch(e){$('#fcShort').innerHTML=errBox(e.message,W.page);$('#fcWeek').innerHTML='';setStatus('fc',{err:e.message});setStatus('wk',{err:e.message})}
+
+  setStatus('feas',{label:'週間予報支援図',staleMin:W.supportStaleMin,pubLabel:'更新'});
+  try{
+    const r=await getRes(W.supportPdf);
+    const {imgs}=await pdfToImages(await r.res.arrayBuffer(),{maxPages:2});
+    $('#feasBox').innerHTML=imgs.map((u,i)=>figHtml('figFeas'+i,W.supportName)).join('<div style="height:6px"></div>');
+    imgs.forEach((u,i)=>setFigImg('figFeas'+i,u));
+    setStatus('feas',{pub:r.lastModified,got:r.got,offline:r.offline});
+  }catch(e){setFigErr('figFeas',e.message,SRCDEF.nwpPdf.page);setStatus('feas',{err:e.message})}
+}
+
+const LOADERS={0:loadHome,1:loadSynoptic,2:loadRadarNow,3:loadRadarFcst,7:loadWeekly};
+
+/* ───────── 時計・通信状態 ───────── */
+function tick(){
+  const d=new Date();$('#cJst').textContent=fHm(d);$('#cUtc').textContent=`${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+function netState(){const on=navigator.onLine;$('#net').textContent=on?'ONLINE':'OFFLINE';$('#net').classList.toggle('off',!on)}
+
+/* ───────── 起動 ───────── */
+async function init(){
+  $('#ver').textContent=`｜${VER_TAG} ${BUILD}`;
+  tick();setInterval(tick,10000);
+  netState();addEventListener('online',netState);addEventListener('offline',netState);
+  initViewer();
+  try{SRCDEF=(await getJSON('sources.json?v='+VER_TAG)).data}
+  catch(e){document.body.insertAdjacentHTML('afterbegin',`<div class="err">sources.json を読めませんでした：${esc(e.message)}</div>`);return}
+  buildShell();
+  const start=Math.min(store.get('wx.screen')??0,SCREENS.length-1);
+  /* ホームは設定(府県予報区など)を持つので、どの画面から始めても先に作る */
+  if(start!==0){loaded.add(0);loadHome()}
+  /* ⚠ requestAnimationFrame は画面が隠れていると呼ばれず、最初の画面が読み込まれないままになる */
+  $('#deck').scrollLeft=start*$('#deck').clientWidth;activate(start);
+  if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+init();
+</script>
+</body>
+</html>
