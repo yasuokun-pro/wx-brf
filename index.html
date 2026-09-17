@@ -180,7 +180,7 @@
 import { parseMetar, parseTaf } from './lib/metar.js';
 import { judgeMetar, judgeTaf, worst, LEVEL_JA, FR_RANK } from './lib/judge.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p2-5', BUILD='2026-09-17';
+const VER_TAG='p2-6', BUILD='2026-09-17';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -990,7 +990,7 @@ const MINIMA_FIELDS=[
   ['ceilFt','雲底 ミニマ(ft)'],['ceilMarginFt','雲底 余裕幅(ft)'],['visM','視程 ミニマ(m)'],['visMarginM','視程 余裕幅(m)'],
   ['windKt','風速 上限(kt)'],['windMarginKt','風速 余裕幅(kt)'],['xwindKt','横風 上限(kt)'],['xwindMarginKt','横風 余裕幅(kt)'],
   ['vmcCeilFt','VMC 雲高の基準(ft)'],['vmcVisM','VMC 地上視程の基準(m)'],['svfrVisM','SVFR 地上視程の基準(m)'],
-  ['beforeMin','出発前の余裕(分)'],['afterMin','帰投後の余裕(分)'],['spreadC','気温−露点 注意(℃)'],['metarMaxAgeMin','METARの古さ上限(分)'],
+  ['beforeMin','出発前の余裕(分)'],['afterMin','帰投後の余裕(分)'],['spreadC','気温−露点 注意(℃)'],['sctCautionFt','この高さ以下のSCTは注意(ft)'],['metarMaxAgeMin','METARの古さ上限(分)'],
 ];
 const WXDATA={relay:null,relayErr:''};
 let AIRPORTS=null; /* 気象庁の飛行場時系列予報の一覧 {ICAO:{type:'fcst'|'info',name}} */
@@ -1042,7 +1042,7 @@ async function loadAirfields(){
   </div>
   <details class="card"><summary>ミニマと判定の設定</summary>
     <p class="note">値はこの端末の中だけに保存します。空欄の項目は判定できず灰色になります。</p>
-    <div class="grid2">${MINIMA_FIELDS.map(([k,l])=>`<label>${l}<input inputmode="decimal" data-mn="${k}" value="${esc(mn[k]??'')}" placeholder="${{spreadC:'3',metarMaxAgeMin:'90',beforeMin:'0',afterMin:'0',vmcCeilFt:'1000',vmcVisM:'5000',svfrVisM:'1500'}[k]||''}"></label>`).join('')}</div>
+    <div class="grid2">${MINIMA_FIELDS.map(([k,l])=>`<label>${l}<input inputmode="decimal" data-mn="${k}" value="${esc(mn[k]??'')}" placeholder="${{spreadC:'3',sctCautionFt:'1000',metarMaxAgeMin:'90',beforeMin:'0',afterMin:'0',vmcCeilFt:'1000',vmcVisM:'5000',svfrVisM:'1500'}[k]||''}"></label>`).join('')}</div>
     <p class="note" style="margin-top:6px"><b>VMC</b>：航空法施行規則第5条第4号（管制圏・情報圏内の空港等で離着陸）の基準、雲高300m≒1,000ft以上かつ地上視程5km以上。告示で指定された空港は8km・450mなので変えてください。<b style="color:#ff8a3d">SVFR</b>：IMCのうち地上視程1,500m以上（管制業務処理規程で、管制圏・情報圏のある飛行場の地上視程が1,500m以上なら管制機関は特別VFRを許可できる。雲高の条件は無い。許可が要る）。<b style="color:var(--red)">IMC</b>：地上視程1,500m未満。雲からの距離など、地上の観測では決まらない条件は見ていません。</p>
     <p class="note" style="margin-top:8px">NO-GOにする天気現象（それ以外の降水・しゅう雨・周辺の現象・TCUは注意）</p>
     <div class="row">${NOGO_WX.map(([k,l])=>`<label class="chk"><input type="checkbox" data-wx="${k}" ${(mn.nogoWx||NOGO_WX_DEFAULT).includes(k)?'checked':''}>${l}</label>`).join('')}</div>

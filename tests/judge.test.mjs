@@ -38,6 +38,21 @@ test('雲底：ミニマ未満はNO-GO、余裕幅未満は注意、境界はミ
   assert.equal(item(J('METAR RJTT 170530Z 00000KT 0200 FG VV002 15/15 Q1019'), 'ceil').level, 'nogo');
 });
 
+test('1000ft以下のSCTは注意（設定で変えられる）', () => {
+  assert.equal(item(J('METAR RJTT 170530Z 06010KT 9999 SCT010 BKN030 20/10 Q1019'), 'lowsct').level, 'caution');
+  assert.equal(item(J('METAR RJTT 170530Z 06010KT 9999 SCT005 20/10 Q1019'), 'lowsct').level, 'caution');
+  assert.equal(J('METAR RJTT 170530Z 06010KT 9999 SCT008 20/10 Q1019').level, 'caution');
+  /* 1100ft は対象外、FEW も対象外 */
+  assert.equal(item(J('METAR RJTT 170530Z 06010KT 9999 SCT011 20/10 Q1019'), 'lowsct'), undefined);
+  assert.equal(item(J('METAR RJTT 170530Z 06010KT 9999 FEW005 20/10 Q1019'), 'lowsct'), undefined);
+  assert.equal(judgeMetar(parseMetar('METAR RJTT 170530Z 06010KT 9999 SCT011 20/10 Q1019', { ref: REF }), { ...MIN, sctCautionFt: 1500 }, { now: REF }).items.find(i => i.key === 'lowsct').level, 'caution');
+  /* TAFの本体でも注意 */
+  const t = parseTaf('TAF RJTT 170505Z 1706/1812 02012KT 9999 SCT007 BKN030', { ref: REF });
+  const r = judgeTaf(t, MIN, { from: new Date(Date.UTC(2026, 8, 17, 8)), to: new Date(Date.UTC(2026, 8, 17, 9)) });
+  assert.equal(r.slots[0].level, 'caution');
+  assert.ok(r.slots[0].hits.some(h => h.label.includes('SCT')));
+});
+
 test('視程：CAVOKはGO、SMも換算して判定', () => {
   assert.equal(item(J('METAR RJTT 170530Z 06010KT CAVOK 20/10 Q1019'), 'vis').level, 'go');
   assert.equal(item(J('METAR RJTT 170530Z 06010KT 4000 BR FEW010 20/17 Q1019'), 'vis').level, 'nogo');
