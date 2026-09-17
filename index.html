@@ -143,7 +143,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script type="module">
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p1-2', BUILD='2026-09-17';
+const VER_TAG='p1-3', BUILD='2026-09-17';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -526,6 +526,25 @@ function nwpCardHtml(g){
   const seg=g.variants.length>1?`<span class="sp"></span><span class="seg" id="seg_${g.id}">${g.variants.map((v,i)=>`<button data-v="${i}" class="${i===0?'on':''}">${v.ft?v.ft.join('・')+'h':v.id}</button>`).join('')}</span>`:'';
   return `<div class="card"><h3>${esc(g.name)}${seg}</h3>${metaEl('nwp_'+g.id)}<div class="meta" id="vt_${g.id}"></div><div id="box_${g.id}">${figHtml('fig_'+g.id,g.name)}</div></div>`;
 }
+/* 上下2段の図(FEAS等)から下段だけを切り出す。段の間の白い帯(高さの35〜65%で一番長い空白行の並び)で分ける */
+async function cropLowerPanel(src){
+  const img=new Image();img.src=src;await img.decode();
+  const W=img.naturalWidth,H=img.naturalHeight;
+  const cv=document.createElement('canvas');cv.width=W;cv.height=H;
+  const ctx=cv.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0);
+  const d=ctx.getImageData(0,0,W,H).data;
+  let best=null,run=-1;
+  for(let y=Math.floor(H*.35);y<H*.65;y++){
+    let dark=0;for(let x=0;x<W;x+=4){if(d[(y*W+x)*4]<160&&++dark>2)break}
+    if(dark<=2){if(run<0)run=y}
+    else if(run>=0){if(!best||y-run>best[1]-best[0])best=[run,y];run=-1}
+  }
+  if(!best) throw new Error('図の上下の区切りが見つかりません');
+  const top=Math.max(0,best[1]-Math.round(W*.006));
+  const out=document.createElement('canvas');out.width=W;out.height=H-top;
+  out.getContext('2d').drawImage(cv,0,-top);
+  return URL.createObjectURL(await new Promise(r=>out.toBlob(r,'image/png')));
+}
 /* 初期時刻＝更新日時より前で一番近い {hh}UTC(PDFのファイル名に00/12が入っている) */
 function initFrom(lm,hh){
   const d=new Date(Date.UTC(lm.getUTCFullYear(),lm.getUTCMonth(),lm.getUTCDate(),+hh));
@@ -549,7 +568,8 @@ async function showNwp(g,v){
   const box=document.getElementById('box_'+g.id),vt=document.getElementById('vt_'+g.id);
   const tok={};box._tok=tok;
   box.innerHTML=figHtml('fig_'+g.id,g.name);vt.textContent='';
-  setStatus(key,{label:v.id.toUpperCase(),staleMin:g.staleMin||P.staleMin,pubLabel:'更新',got:null,err:null});
+  const name=`${v.id.toUpperCase()}${g.tag?' '+g.tag:''}`;
+  setStatus(key,{label:name,staleMin:g.staleMin||P.staleMin,pubLabel:'更新',got:null,err:null});
   try{
     let c=PDF_CACHE.get(v.id);
     if(!c){
@@ -563,12 +583,15 @@ async function showNwp(g,v){
       c={imgs,hh:r.hh,lastModified:r.lastModified,got:r.got,offline:r.offline,init:r.lastModified?initFrom(r.lastModified,r.hh):null};
       PDF_CACHE.set(v.id,c);
     }
+    /* 同じPDFを別のカードで下段だけ見せる場合も、取得と描画は1回で済ませる */
+    let imgs=c.imgs;
+    if(g.crop==='lower') imgs=[c.lower||(c.lower=await cropLowerPanel(c.imgs[0]))];
     if(box._tok!==tok) return c; /* 読み込み中に別のボタンが押された */
-    box.innerHTML=c.imgs.map((u,i)=>figHtml(`fig_${g.id}_${i}`,`${v.id.toUpperCase()}（初期 ${c.hh}UTC）`)).join('<div style="height:6px"></div>');
-    c.imgs.forEach((u,i)=>setFigImg(`fig_${g.id}_${i}`,u));
+    box.innerHTML=imgs.map((u,i)=>figHtml(`fig_${g.id}_${i}`,`${name}（初期 ${c.hh}UTC）`)).join('<div style="height:6px"></div>');
+    imgs.forEach((u,i)=>setFigImg(`fig_${g.id}_${i}`,u));
     if(c.init) vt.innerHTML=(v.ft?'初期値':'解析')+` ${fBoth(c.init)}`
       +(v.ft?v.ft.map(h=>`<br>${h}h予想 → <span style="color:var(--cyn)">${fBoth(new Date(c.init.getTime()+h*3600e3))}</span>`).join(''):'');
-    setStatus(key,{label:`${v.id.toUpperCase()}（${c.hh}UTC）`,pub:c.lastModified,got:c.got,offline:c.offline});
+    setStatus(key,{label:`${name}（${c.hh}UTC）`,pub:c.lastModified,got:c.got,offline:c.offline});
     return c;
   }catch(e){if(box._tok===tok){setFigErr('fig_'+g.id,e.message,P.page);setStatus(key,{err:e.message})}}
 }
@@ -769,13 +792,15 @@ async function loadWeekly(){
   const office=(store.get('wx.cfg')||{}).office||'130000';
   b.innerHTML=`
   <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${nwpCardHtml(P.weeklySfc)}
+  <p class="note" style="margin:-4px 4px 10px">気象庁は3日目以降の地上予想天気図（前線入りのカラー版）を公開していません。下の週間天気図の下段（地上気圧・850hPa気温）を切り出して表示しています。</p>
   ${nwpCardHtml(P.weekly)}
   <div class="card"><h3>週間天気予報</h3>${metaEl('wk')}<div id="fcWeek" class="wk loading">読み込み中…</div>
     <p class="note">府県予報区はホーム画面で変えられます。信頼度 A＞B＞C。</p></div>
   <div class="card"><h3>週間予報解説資料<span class="sp"></span><button id="btnShukan">表示する</button></h3>${metaEl('shukan')}<div id="shukanBox"><p class="note">PDF。フェーズ3でAI解説の入力にします。</p></div></div>
   <div class="card"><h3>AI解説<span class="sp"></span><span class="badge none">未実装</span></h3><p class="note">フェーズ3で表示します。</p></div>`;
   $('#btnShukan').onclick=()=>loadPdfInto('shukan','週間予報解説資料',SRCDEF.commentary.shukanPdf,'shukanBox',{maxPages:6,width:1400,staleMin:SRCDEF.commentary.staleMin});
-  const chart=initNwpCard(P.weekly);
+  const chart=(async()=>{await initNwpCard(P.weeklySfc);await initNwpCard(P.weekly)})();
 
   setStatus('wk',{label:'週間天気予報',staleMin:W.staleMin,pubLabel:'発表'});
   try{
