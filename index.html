@@ -143,7 +143,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script type="module">
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p1-1', BUILD='2026-09-17';
+const VER_TAG='p1-2', BUILD='2026-09-17';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -212,8 +212,9 @@ const SCREENS=[
   {n:4,name:'経路',later:'フェーズ4'},
   {n:5,name:'飛行場',later:'フェーズ2'},
   {n:6,name:'鉛直構造',later:'フェーズ4'},
-  {n:7,name:'週間'},
-  {n:8,name:'まとめ',later:'フェーズ3'},
+  {n:7,name:'明日の予想'},
+  {n:8,name:'週間'},
+  {n:9,name:'まとめ',later:'フェーズ3'},
 ];
 let SRCDEF=null;
 const loaded=new Set();
@@ -252,7 +253,7 @@ function laterHtml(s){
     4:'下層悪天予想図（詳細版）、経路上の自動判定表、予報官の経路予報の写真添付欄。',
     5:'METAR/TAFの原文と日本語デコード、横風成分、ミニマ判定。国際配信されない飛行場のMETARは写真からテキスト認識でコピーして貼り付ける欄を設けます。',
     6:'メテオグラム、自作の予報断面図、Skew-Tと安定度指数、公式の飛行場時系列予報。',
-    8:'各画面の話すポイントをつないだ読み上げ用のブリーフィング台本。'})[s.n]}</p></div>`;
+    9:'各画面の話すポイントをつないだ読み上げ用のブリーフィング台本。'})[s.n]}</p></div>`;
 }
 
 /* ───────── 図：タップで全画面ビューア ───────── */
@@ -399,7 +400,8 @@ const JUDGE_ROWS=[
   {n:4,name:'経路',note:'区間ごと（フェーズ4）'},
   {n:5,name:'飛行場',note:'METAR/TAFとミニマ（フェーズ2）'},
   {n:6,name:'鉛直構造',note:'時間帯・安定度（フェーズ4）'},
-  {n:7,name:'週間',note:'判定なし'},
+  {n:7,name:'明日の予想',note:'判定なし（解説のみ）'},
+  {n:8,name:'週間',note:'判定なし'},
 ];
 async function loadHome(){
   const b=$('#scr0 .body');
@@ -431,12 +433,12 @@ async function loadHome(){
   b.querySelectorAll('[data-go]').forEach(a=>a.onclick=e=>{e.preventDefault();goTo(SCREENS.findIndex(s=>s.n===+a.dataset.go))});
   const save=()=>{store.set('wx.cfg',{when:$('#cfgWhen').value,ad:$('#cfgAd').value.toUpperCase().trim(),office:$('#cfgOffice').value})};
   $('#cfgWhen').onchange=save;$('#cfgAd').onchange=save;
-  $('#cfgOffice').onchange=()=>{save();loaded.delete(7)};
+  $('#cfgOffice').onchange=()=>{save();loaded.delete(7);loaded.delete(8)};
   $('#btnReload').onclick=()=>{
     const keep=SCREENS[curIdx].n;
     for(const n of [...loaded]) if(n!==0) loaded.delete(n);
-    for(const n of [1,2,3,7]) $(`#scr${n} .body`).innerHTML='';
-    MAPS.forEach(m=>m.remove());MAPS.length=0;SRC.clear();renderHomeStatus();
+    for(const n of [1,2,3,7,8]) $(`#scr${n} .body`).innerHTML='';
+    MAPS.forEach(m=>m.remove());MAPS.length=0;SRC.clear();PDF_CACHE.clear();renderHomeStatus();
     if(keep!==0){loaded.delete(keep);activate(curIdx)}
   };
   renderHomeStatus();
@@ -458,15 +460,16 @@ function renderHomeStatus(){
 /* ═════════ 1 総観 ═════════ */
 async function loadSynoptic(){
   const b=$('#scr1 .body');
-  const charts=SRCDEF.nwpPdf.charts;
+  const charts=SRCDEF.nwpPdf.analysis;
   b.innerHTML=`
   <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
   <div class="card">
-    <h3>地上天気図<span class="sp"></span><span class="seg" id="wmSeg"><button data-k="now" class="on">実況</button><button data-k="ft24">24h予想</button><button data-k="ft48">48h予想</button></span></h3>
+    <h3>地上天気図（実況）</h3>
     ${metaEl('wm')}
     ${figHtml('figWm','地上天気図')}
   </div>
-  ${charts.map(c=>`<div class="card"><h3>${esc(c.name)}</h3>${metaEl('nwp_'+c.id)}<div id="nwp_${c.id}">${figHtml('fig_'+c.id,c.name)}</div></div>`).join('')}
+  ${charts.map(nwpCardHtml).join('')}
+  <p class="note" style="margin:0 4px 10px">予想天気図・予想図は「7 明日の予想」にあります。</p>
   <div class="card">
     <h3>ひまわり（日本域）<span class="sp"></span><span class="seg" id="satSeg">${SRCDEF.himawari.bands.map((x,i)=>`<button data-b="${x.id}" class="${i===0?'on':''}">${x.name}</button>`).join('')}</span></h3>
     ${metaEl('sat')}
@@ -490,8 +493,7 @@ async function loadSynoptic(){
     <p class="note">フェーズ3：高層解析チェックリスト（トラフ・正渦度域・寒気・湿数・前線）に沿って、図の上に見るべき点の印を重ねて解説します。</p>
   </div>`;
 
-  loadWeatherMap();
-  $('#wmSeg').onclick=e=>{const x=e.target.closest('button');if(!x)return;$('#wmSeg').querySelectorAll('button').forEach(y=>y.classList.toggle('on',y===x));loadWeatherMap(x.dataset.k)};
+  loadWeatherMap('now','figWm','wm');
   loadSat();
   setStatus('avcmt',{label:'全国航空気象解説報',staleMin:SRCDEF.commentary.staleMin,pubLabel:'更新'});
   getRes(SRCDEF.commentary.aviationAirspace).then(async r=>{
@@ -499,11 +501,10 @@ async function loadSynoptic(){
     setStatus('avcmt',{pub:r.lastModified,got:r.got,offline:r.offline});
   }).catch(e=>{setFigErr('figAvCmt',e.message,SRCDEF.commentary.aviationPage);setStatus('avcmt',{err:e.message})});
   $('#btnTanki').onclick=()=>loadPdfInto('tanki','短期予報解説資料',SRCDEF.commentary.tankiPdf,'tankiBox',{maxPages:6,width:1400,staleMin:SRCDEF.commentary.staleMin});
-  for(const c of charts) await loadNwpChart(c); /* PDFの描画は重いので1枚ずつ */
+  for(const g of charts) await initNwpCard(g); /* PDFの描画は重いので1枚ずつ */
 }
-async function loadWeatherMap(kind='now'){
-  const key='wm';
-  setStatus(key,{label:'地上天気図',got:null,err:null});
+async function loadWeatherMap(kind,figId,key){
+  setStatus(key,{label:kind==='now'?'地上天気図':'地上予想天気図',got:null,err:null});
   try{
     const r=await getJSON(SRCDEF.weatherMap.list);
     const list=r.data.near?.[kind]||[];
@@ -514,27 +515,62 @@ async function loadWeatherMap(kind='now'){
     const made=m?jmaTime(m[1]):null, base=m?jmaTime(m[2]):null;
     const hrs=kind==='ft24'?24:kind==='ft48'?48:0;
     const img=await getRes(SRCDEF.weatherMap.image.replace('{file}',file));
-    setFigImg('figWm',URL.createObjectURL(await img.res.blob()));
-    document.getElementById('figWm').dataset.title=`地上天気図 ${kind==='now'?'実況':hrs+'h予想'}`;
+    const fig=document.getElementById(figId);if(fig)fig.dataset.title=`地上天気図 ${kind==='now'?'実況':hrs+'h予想'}`;
+    setFigImg(figId,URL.createObjectURL(await img.res.blob()));
     setStatus(key,{pub:made,pubLabel:'発表',valid:base?new Date(base.getTime()+hrs*3600e3):null,got:img.got,offline:img.offline||r.offline,staleMin:SRCDEF.weatherMap.staleMin[kind]});
-  }catch(e){setFigErr('figWm',e.message,SRCDEF.weatherMap.page);setStatus(key,{err:e.message})}
+  }catch(e){setFigErr(figId,e.message,SRCDEF.weatherMap.page);setStatus(key,{err:e.message})}
 }
-async function loadNwpChart(c){
-  const key='nwp_'+c.id, P=SRCDEF.nwpPdf;
-  setStatus(key,{label:c.name.split(' ')[0],staleMin:P.staleMin,pubLabel:'更新'});
+/* 数値予報天気図(PDF)のカード。予想時間の違う図(12・24h／36・48h／72h 等)をボタンで切り替える */
+const PDF_CACHE=new Map();
+function nwpCardHtml(g){
+  const seg=g.variants.length>1?`<span class="sp"></span><span class="seg" id="seg_${g.id}">${g.variants.map((v,i)=>`<button data-v="${i}" class="${i===0?'on':''}">${v.ft?v.ft.join('・')+'h':v.id}</button>`).join('')}</span>`:'';
+  return `<div class="card"><h3>${esc(g.name)}${seg}</h3>${metaEl('nwp_'+g.id)}<div class="meta" id="vt_${g.id}"></div><div id="box_${g.id}">${figHtml('fig_'+g.id,g.name)}</div></div>`;
+}
+/* 初期時刻＝更新日時より前で一番近い {hh}UTC(PDFのファイル名に00/12が入っている) */
+function initFrom(lm,hh){
+  const d=new Date(Date.UTC(lm.getUTCFullYear(),lm.getUTCMonth(),lm.getUTCDate(),+hh));
+  if(d>lm) d.setUTCDate(d.getUTCDate()-1);
+  return d;
+}
+async function initNwpCard(g){
+  const seg=document.getElementById('seg_'+g.id);
+  const pick=async i=>{
+    seg?.querySelectorAll('button').forEach((x,j)=>x.classList.toggle('on',j===i));
+    const c=await showNwp(g,g.variants[i]);
+    /* 週間の図はボタンを「+24h」ではなく対象日で出す */
+    if(c?.init&&g.dateLabels&&seg) seg.querySelectorAll('button').forEach((x,j)=>{
+      const k=jst(new Date(c.init.getTime()+g.variants[j].ft[0]*3600e3));x.textContent=`${k.mo}/${k.d}(${WD[k.wd]})`});
+  };
+  if(seg) seg.onclick=e=>{const x=e.target.closest('button');if(x)pick(+x.dataset.v)};
+  await pick(0);
+}
+async function showNwp(g,v){
+  const P=SRCDEF.nwpPdf,key='nwp_'+g.id;
+  const box=document.getElementById('box_'+g.id),vt=document.getElementById('vt_'+g.id);
+  const tok={};box._tok=tok;
+  box.innerHTML=figHtml('fig_'+g.id,g.name);vt.textContent='';
+  setStatus(key,{label:v.id.toUpperCase(),staleMin:g.staleMin||P.staleMin,pubLabel:'更新',got:null,err:null});
   try{
-    /* 00UTC版と12UTC版のうち新しい方(更新日時で比べる) */
-    const cands=await Promise.allSettled(c.hh.map(hh=>getRes(P.url.replace('{id}',c.id).replace('{hh}',hh)).then(r=>Object.assign(r,{hh}))));
-    const ok=cands.filter(x=>x.status==='fulfilled').map(x=>x.value).sort((a,b)=>(b.lastModified?.getTime()||0)-(a.lastModified?.getTime()||0));
-    if(!ok.length) throw new Error(cands[0].reason?.message||'取得失敗');
-    const r=ok[0];
-    const buf=await r.res.arrayBuffer();
-    const {imgs}=await pdfToImages(buf,{maxPages:2});
-    const wrap=document.getElementById('nwp_'+c.id);
-    wrap.innerHTML=imgs.map((u,i)=>figHtml(`fig_${c.id}_${i}`,`${c.name}（${r.hh}UTC）`)).join('<div style="height:6px"></div>');
-    imgs.forEach((u,i)=>setFigImg(`fig_${c.id}_${i}`,u));
-    setStatus(key,{pub:r.lastModified,got:r.got,offline:r.offline,label:`${c.name.split(' ')[0]}（${r.hh}UTC）`});
-  }catch(e){setFigErr('fig_'+c.id,e.message,P.page);setStatus(key,{err:e.message})}
+    let c=PDF_CACHE.get(v.id);
+    if(!c){
+      /* 00UTC版と12UTC版のうち新しい方(更新日時で比べる) */
+      const hh=g.hh||['00','12'];
+      const cands=await Promise.allSettled(hh.map(h=>getRes(P.url.replace('{id}',v.id).replace('{hh}',h)).then(r=>Object.assign(r,{hh:h}))));
+      const ok=cands.filter(x=>x.status==='fulfilled').map(x=>x.value).sort((a,b)=>(b.lastModified?.getTime()||0)-(a.lastModified?.getTime()||0));
+      if(!ok.length) throw new Error(cands[0].reason?.message||'取得失敗');
+      const r=ok[0];
+      const {imgs}=await pdfToImages(await r.res.arrayBuffer(),{maxPages:2});
+      c={imgs,hh:r.hh,lastModified:r.lastModified,got:r.got,offline:r.offline,init:r.lastModified?initFrom(r.lastModified,r.hh):null};
+      PDF_CACHE.set(v.id,c);
+    }
+    if(box._tok!==tok) return c; /* 読み込み中に別のボタンが押された */
+    box.innerHTML=c.imgs.map((u,i)=>figHtml(`fig_${g.id}_${i}`,`${v.id.toUpperCase()}（初期 ${c.hh}UTC）`)).join('<div style="height:6px"></div>');
+    c.imgs.forEach((u,i)=>setFigImg(`fig_${g.id}_${i}`,u));
+    if(c.init) vt.innerHTML=(v.ft?'初期値':'解析')+` ${fBoth(c.init)}`
+      +(v.ft?v.ft.map(h=>`<br>${h}h予想 → <span style="color:var(--cyn)">${fBoth(new Date(c.init.getTime()+h*3600e3))}</span>`).join(''):'');
+    setStatus(key,{label:`${v.id.toUpperCase()}（${c.hh}UTC）`,pub:c.lastModified,got:c.got,offline:c.offline});
+    return c;
+  }catch(e){if(box._tok===tok){setFigErr('fig_'+g.id,e.message,P.page);setStatus(key,{err:e.message})}}
 }
 async function loadPdfInto(key,label,url,boxId,{maxPages,width,staleMin}){
   const box=document.getElementById(boxId);box.innerHTML='<div class="loading">読み込み中…</div>';
@@ -692,60 +728,77 @@ const telop=c=>TELOP[c]||({1:'晴れ系',2:'曇り系',3:'雨系',4:'雪系'})[S
 const ICON=c=>({1:'☀️',2:'☁️',3:'☔',4:'❄️'})[String(c)[0]]||'';
 const WD=['日','月','火','水','木','金','土'];
 
-async function loadWeekly(){
-  const b=$('#scr7 .body'),W=SRCDEF.weekly;
-  const office=(store.get('wx.cfg')||{}).office||'130000';
+/* ═════════ 7 明日の予想 ═════════ */
+async function loadTomorrow(){
+  const b=$('#scr7 .body'),P=SRCDEF.nwpPdf;
   b.innerHTML=`
   <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
-  <div class="card"><h3>府県天気予報（今日・明日）</h3>${metaEl('fc')}<div id="fcShort" class="loading">読み込み中…</div></div>
-  <div class="card"><h3>週間天気予報</h3>${metaEl('wk')}<div id="fcWeek" class="wk loading">読み込み中…</div>
-    <p class="note">府県予報区はホーム画面で変えられます。信頼度 A＞B＞C。</p></div>
-  <div class="card"><h3>${esc(W.supportName)}</h3>${metaEl('feas')}<div id="feasBox">${figHtml('figFeas',W.supportName)}</div>
-    <p class="note">どの週間予報支援図を使うかは未決事項です（FXXN519は廃止）。</p></div>
-  <div class="card"><h3>週間予報解説資料<span class="sp"></span><button id="btnShukan">表示する</button></h3>${metaEl('shukan')}<div id="shukanBox"><p class="note">PDF。フェーズ3でAI解説の入力にします。</p></div></div>
-  <div class="card"><h3>AI解説<span class="sp"></span><span class="badge none">未実装</span></h3><p class="note">フェーズ3で表示します。</p></div>`;
-  $('#btnShukan').onclick=()=>loadPdfInto('shukan','週間予報解説資料',SRCDEF.commentary.shukanPdf,'shukanBox',{maxPages:6,width:1400,staleMin:SRCDEF.commentary.staleMin});
-
+  <div class="card">
+    <h3>地上予想天気図<span class="sp"></span><span class="seg" id="wmfSeg"><button data-k="ft24" class="on">24h予想</button><button data-k="ft48">48h予想</button></span></h3>
+    ${metaEl('wmF')}
+    ${figHtml('figWmF','地上予想天気図')}
+  </div>
+  ${P.forecast.map(nwpCardHtml).join('')}
+  <div class="card"><h3>府県天気予報（今日・明日）</h3>${metaEl('fc')}<div id="fcShort" class="loading">読み込み中…</div>
+    <p class="note">府県予報区はホーム画面で変えられます。</p></div>
+  <div class="card"><h3>AI解説<span class="sp"></span><span class="badge none">未実装</span></h3>
+    <p class="note">フェーズ3：実況（画面1）から予想図への変化を、トラフの移動・前線・寒気の流入の順に解説します。</p></div>`;
+  loadWeatherMap('ft24','figWmF','wmF');
+  $('#wmfSeg').onclick=e=>{const x=e.target.closest('button');if(!x)return;$('#wmfSeg').querySelectorAll('button').forEach(y=>y.classList.toggle('on',y===x));loadWeatherMap(x.dataset.k,'figWmF','wmF')};
+  loadShortForecast();
+  for(const g of P.forecast) await initNwpCard(g);
+}
+async function loadShortForecast(){
+  const W=SRCDEF.weekly,office=(store.get('wx.cfg')||{}).office||'130000';
   setStatus('fc',{label:'府県天気予報',staleMin:W.staleMin,pubLabel:'発表'});
-  setStatus('wk',{label:'週間天気予報',staleMin:W.staleMin,pubLabel:'発表'});
   try{
     const r=await getJSON(W.forecast.replace('{office}',office));
-    const [short,week]=r.data;
-    /* 今日・明日：天気と風(ヘリ運航では風の文言を必ず見る) */
-    const ts=short.timeSeries[0];
+    const short=r.data[0],ts=short.timeSeries[0];
+    /* 天気と風(ヘリ運航では風の文言を必ず見る) */
     $('#fcShort').className='';
     $('#fcShort').innerHTML=`<div class="note" style="margin-bottom:4px">${esc(short.publishingOffice)}</div>`+ts.areas.map(a=>`
       <div style="margin:8px 0"><b style="font-size:13px">${esc(a.area.name)}</b>
       <table class="t">${ts.timeDefines.map((t,i)=>{const d=new Date(t),j=jst(d);return `<tr><td class="m" style="width:5.5em">${j.mo}/${j.d}(${WD[j.wd]})</td><td>${ICON(a.weatherCodes?.[i])} ${esc(a.weathers?.[i]||telop(a.weatherCodes?.[i]))}${a.winds?.[i]?`<div class="note">風：${esc(a.winds[i])}</div>`:''}${a.waves?.[i]?`<div class="note">波：${esc(a.waves[i])}</div>`:''}</td></tr>`}).join('')}</table></div>`).join('');
     setStatus('fc',{pub:new Date(short.reportDatetime),got:r.got,offline:r.offline});
-
-    if(week){
-      const w0=week.timeSeries[0],w1=week.timeSeries[1];
-      const days=w0.timeDefines.map(t=>{const j=jst(new Date(t));return `${j.mo}/${j.d}<br>(${WD[j.wd]})`});
-      $('#fcWeek').className='wk';
-      $('#fcWeek').innerHTML=w0.areas.map((a,ai)=>{
-        const tp=w1?.areas?.[ai]||w1?.areas?.[0];
-        return `<b style="font-size:13px">${esc(a.area.name)}</b><table class="t"><tr><th></th>${days.map(d=>`<th>${d}</th>`).join('')}</tr>
-        <tr><th>天気</th>${a.weatherCodes.map(c=>`<td>${ICON(c)}<div class="note">${esc(telop(c))}</div></td>`).join('')}</tr>
-        <tr><th>降水確率</th>${a.pops.map(p=>`<td class="m">${p===''?'—':p+'%'}</td>`).join('')}</tr>
-        <tr><th>信頼度</th>${(a.reliabilities||[]).map(x=>`<td class="m">${x||'—'}</td>`).join('')}</tr>
-        ${tp?`<tr><th>最高/最低<br><span class="note">${esc(tp.area.name)}</span></th>${days.map((_,i)=>`<td class="m">${tp.tempsMax?.[i]||'—'}/${tp.tempsMin?.[i]||'—'}</td>`).join('')}</tr>`:''}
-        </table>`}).join('');
-      setStatus('wk',{pub:new Date(week.reportDatetime),got:r.got,offline:r.offline});
-    }
-  }catch(e){$('#fcShort').innerHTML=errBox(e.message,W.page);$('#fcWeek').innerHTML='';setStatus('fc',{err:e.message});setStatus('wk',{err:e.message})}
-
-  setStatus('feas',{label:'週間予報支援図',staleMin:W.supportStaleMin,pubLabel:'更新'});
-  try{
-    const r=await getRes(W.supportPdf);
-    const {imgs}=await pdfToImages(await r.res.arrayBuffer(),{maxPages:2});
-    $('#feasBox').innerHTML=imgs.map((u,i)=>figHtml('figFeas'+i,W.supportName)).join('<div style="height:6px"></div>');
-    imgs.forEach((u,i)=>setFigImg('figFeas'+i,u));
-    setStatus('feas',{pub:r.lastModified,got:r.got,offline:r.offline});
-  }catch(e){setFigErr('figFeas',e.message,SRCDEF.nwpPdf.page);setStatus('feas',{err:e.message})}
+  }catch(e){$('#fcShort').innerHTML=errBox(e.message,W.page);setStatus('fc',{err:e.message})}
 }
 
-const LOADERS={0:loadHome,1:loadSynoptic,2:loadRadarNow,3:loadRadarFcst,7:loadWeekly};
+/* ═════════ 8 週間 ═════════ */
+async function loadWeekly(){
+  const b=$('#scr8 .body'),W=SRCDEF.weekly,P=SRCDEF.nwpPdf;
+  const office=(store.get('wx.cfg')||{}).office||'130000';
+  b.innerHTML=`
+  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${nwpCardHtml(P.weekly)}
+  <div class="card"><h3>週間天気予報</h3>${metaEl('wk')}<div id="fcWeek" class="wk loading">読み込み中…</div>
+    <p class="note">府県予報区はホーム画面で変えられます。信頼度 A＞B＞C。</p></div>
+  <div class="card"><h3>週間予報解説資料<span class="sp"></span><button id="btnShukan">表示する</button></h3>${metaEl('shukan')}<div id="shukanBox"><p class="note">PDF。フェーズ3でAI解説の入力にします。</p></div></div>
+  <div class="card"><h3>AI解説<span class="sp"></span><span class="badge none">未実装</span></h3><p class="note">フェーズ3で表示します。</p></div>`;
+  $('#btnShukan').onclick=()=>loadPdfInto('shukan','週間予報解説資料',SRCDEF.commentary.shukanPdf,'shukanBox',{maxPages:6,width:1400,staleMin:SRCDEF.commentary.staleMin});
+  const chart=initNwpCard(P.weekly);
+
+  setStatus('wk',{label:'週間天気予報',staleMin:W.staleMin,pubLabel:'発表'});
+  try{
+    const r=await getJSON(W.forecast.replace('{office}',office));
+    const week=r.data[1];
+    if(!week) throw new Error('この予報区の週間予報がありません');
+    const w0=week.timeSeries[0],w1=week.timeSeries[1];
+    const days=w0.timeDefines.map(t=>{const j=jst(new Date(t));return `${j.mo}/${j.d}<br>(${WD[j.wd]})`});
+    $('#fcWeek').className='wk';
+    $('#fcWeek').innerHTML=w0.areas.map((a,ai)=>{
+      const tp=w1?.areas?.[ai]||w1?.areas?.[0];
+      return `<b style="font-size:13px">${esc(a.area.name)}</b><table class="t"><tr><th></th>${days.map(d=>`<th>${d}</th>`).join('')}</tr>
+      <tr><th>天気</th>${a.weatherCodes.map(c=>`<td>${ICON(c)}<div class="note">${esc(telop(c))}</div></td>`).join('')}</tr>
+      <tr><th>降水確率</th>${a.pops.map(p=>`<td class="m">${p===''?'—':p+'%'}</td>`).join('')}</tr>
+      <tr><th>信頼度</th>${(a.reliabilities||[]).map(x=>`<td class="m">${x||'—'}</td>`).join('')}</tr>
+      ${tp?`<tr><th>最高/最低<br><span class="note">${esc(tp.area.name)}</span></th>${days.map((_,i)=>`<td class="m">${tp.tempsMax?.[i]||'—'}/${tp.tempsMin?.[i]||'—'}</td>`).join('')}</tr>`:''}
+      </table>`}).join('');
+    setStatus('wk',{pub:new Date(week.reportDatetime),got:r.got,offline:r.offline});
+  }catch(e){$('#fcWeek').className='';$('#fcWeek').innerHTML=errBox(e.message,W.page);setStatus('wk',{err:e.message})}
+  await chart;
+}
+
+const LOADERS={0:loadHome,1:loadSynoptic,2:loadRadarNow,3:loadRadarFcst,7:loadTomorrow,8:loadWeekly};
 
 /* ───────── 時計・通信状態 ───────── */
 function tick(){

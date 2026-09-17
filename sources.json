@@ -24,11 +24,26 @@
     "tile": "https://www.jma.go.jp/bosai/himawari/data/satimg/{basetime}/jp/{validtime}/{band}/{z}/{x}/{y}.jpg",
     "maxNativeZoom": 6,
     "bands": [
-      { "id": "B13/TBB", "name": "赤外" },
-      { "id": "B08/TBB", "name": "水蒸気" },
-      { "id": "B03/ALBD", "name": "可視" },
-      { "id": "SND/ETC", "name": "雲頂強調" },
-      { "id": "REP/ETC", "name": "トゥルーカラー" }
+      {
+        "id": "B13/TBB",
+        "name": "赤外"
+      },
+      {
+        "id": "B08/TBB",
+        "name": "水蒸気"
+      },
+      {
+        "id": "B03/ALBD",
+        "name": "可視"
+      },
+      {
+        "id": "SND/ETC",
+        "name": "雲頂強調"
+      },
+      {
+        "id": "REP/ETC",
+        "name": "トゥルーカラー"
+      }
     ],
     "staleMin": 30,
     "page": "https://www.jma.go.jp/bosai/himawari/"
@@ -36,28 +51,198 @@
   "weatherMap": {
     "list": "https://www.jma.go.jp/bosai/weather_map/data/list.json",
     "image": "https://www.jma.go.jp/bosai/weather_map/data/png/{file}",
-    "staleMin": { "now": 240, "ft24": 780, "ft48": 780 },
+    "staleMin": {
+      "now": 240,
+      "ft24": 780,
+      "ft48": 780
+    },
     "page": "https://www.jma.go.jp/bosai/weather_map/"
   },
   "nwpPdf": {
     "url": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/{id}_{hh}.pdf",
     "page": "https://www.jma.go.jp/bosai/numericmap/",
     "staleMin": 840,
-    "charts": [
-      { "id": "aupq35", "name": "AUPQ35 高層天気図 500/300hPa", "hh": ["00", "12"] },
-      { "id": "aupq78", "name": "AUPQ78 高層天気図 850/700hPa", "hh": ["00", "12"] },
-      { "id": "axfe578", "name": "AXFE578 解析 850hPa気温・風・700hPa上昇流 / 500hPa気温・700hPa湿数", "hh": ["00", "12"] },
-      { "id": "fxfe502", "name": "FXFE502 12・24h予想 500hPa高度・渦度 / 地上気圧・降水量", "hh": ["00", "12"] },
-      { "id": "fxfe5782", "name": "FXFE5782 12・24h予想 850hPa気温・風・700hPa上昇流 / 500hPa気温・700hPa湿数", "hh": ["00", "12"] }
-    ]
+    "_note": "id=図の種類。variants の ft は予想時間(h)。解析図は ft なし。hh=初期時刻(UTC)の候補。新しい方を使う",
+    "analysis": [
+      {
+        "id": "aupq35",
+        "name": "AUPQ35 高層天気図 500hPa・300hPa",
+        "variants": [
+          {
+            "id": "aupq35"
+          }
+        ]
+      },
+      {
+        "id": "aupq78",
+        "name": "AUPQ78 高層天気図 850hPa・700hPa",
+        "variants": [
+          {
+            "id": "aupq78"
+          }
+        ]
+      },
+      {
+        "id": "axfe578",
+        "name": "AXFE578 極東 850hPa気温・風、700hPa上昇流／500hPa高度・渦度 解析",
+        "variants": [
+          {
+            "id": "axfe578"
+          }
+        ]
+      }
+    ],
+    "forecast": [
+      {
+        "id": "fxfe50",
+        "name": "極東 地上気圧・風・降水量／500hPa高度・渦度 予想図",
+        "variants": [
+          {
+            "id": "fxfe502",
+            "ft": [
+              12,
+              24
+            ]
+          },
+          {
+            "id": "fxfe504",
+            "ft": [
+              36,
+              48
+            ]
+          },
+          {
+            "id": "fxfe507",
+            "ft": [
+              72
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fxfe578",
+        "name": "極東 850hPa気温・風、700hPa上昇流／700hPa湿数、500hPa気温 予想図",
+        "variants": [
+          {
+            "id": "fxfe5782",
+            "ft": [
+              12,
+              24
+            ]
+          },
+          {
+            "id": "fxfe5784",
+            "ft": [
+              36,
+              48
+            ]
+          },
+          {
+            "id": "fxfe577",
+            "ft": [
+              72
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fxjp854",
+        "name": "FXJP854 日本 850hPa相当温位・風 予想図",
+        "variants": [
+          {
+            "id": "fxjp854",
+            "ft": [
+              12,
+              24,
+              36,
+              48
+            ]
+          }
+        ]
+      }
+    ],
+    "weekly": {
+      "id": "feas",
+      "name": "アジア 地上気圧、850hPa気温／500hPa高度・渦度 予想図（週間）",
+      "hh": [
+        "12"
+      ],
+      "staleMin": 1800,
+      "dateLabels": true,
+      "variants": [
+        {
+          "id": "feas502",
+          "ft": [
+            24
+          ]
+        },
+        {
+          "id": "feas504",
+          "ft": [
+            48
+          ]
+        },
+        {
+          "id": "feas507",
+          "ft": [
+            72
+          ]
+        },
+        {
+          "id": "feas509",
+          "ft": [
+            96
+          ]
+        },
+        {
+          "id": "feas512",
+          "ft": [
+            120
+          ]
+        },
+        {
+          "id": "feas514",
+          "ft": [
+            144
+          ]
+        },
+        {
+          "id": "feas516",
+          "ft": [
+            168
+          ]
+        },
+        {
+          "id": "feas519",
+          "ft": [
+            192
+          ]
+        },
+        {
+          "id": "feas521",
+          "ft": [
+            216
+          ]
+        },
+        {
+          "id": "feas524",
+          "ft": [
+            240
+          ]
+        },
+        {
+          "id": "feas526",
+          "ft": [
+            264
+          ]
+        }
+      ]
+    }
   },
   "weekly": {
     "forecast": "https://www.jma.go.jp/bosai/forecast/data/forecast/{office}.json",
     "areaList": "https://www.jma.go.jp/bosai/common/const/area.json",
-    "supportPdf": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/feas50_12.pdf",
-    "supportName": "FEAS50 週間予報支援図（アンサンブル）",
     "staleMin": 840,
-    "supportStaleMin": 1800,
     "page": "https://www.jma.go.jp/bosai/forecast/"
   },
   "commentary": {
