@@ -351,5 +351,11 @@
     "attribution": "地理院タイル",
     "maxNativeZoom": 18
   },
-  "japanOutline": "japan.json"
+  "japanOutline": "japan.json",
+  "airportTaf": {
+    "list": "https://www.data.jma.go.jp/airinfo/data/conf/airport_options.txt",
+    "image": "https://www.data.jma.go.jp/airinfo/data/pict/taf/{type}_{icao}.png",
+    "page": "https://www.data.jma.go.jp/airinfo/data/awfo_taf.html",
+    "_note": "type: QMCD98=飛行場時系列予報(fcst) / QMCJ98=飛行場時系列情報(info)"
+  }
 }

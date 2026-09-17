@@ -80,6 +80,15 @@ test('欠測はGOにしない（灰）', () => {
   assert.equal(J('METAR RJCC 170500Z 35007KT 0800 FG ////// 17/17 Q1024').level, 'nogo');
 });
 
+test('METARの変化予報(TEMPO)で悪化するなら注意', () => {
+  const r = J('METAR RJTT 170530Z 06010KT 9999 FEW025 24/15 Q1019 TEMPO 3000 SHRA BKN008');
+  assert.equal(item(r, 'trend').level, 'caution');
+  assert.equal(r.level, 'caution');
+  assert.equal(item(J('METAR RJTT 170530Z 06010KT 9999 FEW025 24/15 Q1019 NOSIG'), 'trend'), undefined);
+  /* 今の雨が続くだけ(変化群に天気が書かれていない)なら数えない */
+  assert.equal(item(J('METAR RJAA 171200Z 02014KT 9999 -RA FEW011 BKN020 21/15 Q1021 BECMG FEW010 BKN025'), 'trend'), undefined);
+});
+
 test('古いMETARは灰', () => {
   const r = J('METAR RJTT 170300Z 06010KT 9999 FEW025 24/15 Q1019');
   assert.equal(r.level, 'none');

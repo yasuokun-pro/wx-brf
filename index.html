@@ -93,6 +93,26 @@
   .legend i{display:inline-block;width:14px;height:10px;margin-right:3px;vertical-align:middle;border:1px solid rgba(255,255,255,.15)}
   .chk{font-size:12px;display:inline-flex;align-items:center;gap:4px;color:var(--dim)}
 
+  /* 飛行場(画面5) */
+  .raw{font-family:var(--mono);font-size:13px;line-height:1.9;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 8px;word-break:break-word}
+  .raw .tk{cursor:pointer;border-radius:3px;padding:1px 2px}
+  .raw .tk:hover,.raw .tk.on{background:var(--line);color:var(--cyn)}
+  .raw .tk.unparsed{color:var(--amb);border-bottom:1px dashed var(--amb)}
+  .raw .tk.change{color:var(--mag)}
+  .tkja{font-size:12px;color:var(--cyn);min-height:1.6em;margin:4px 2px}
+  .srcTag{font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:4px;border:1px solid var(--line);color:var(--dim)}
+  .srcTag.manual{color:var(--mag);border-color:var(--mag)}
+  table.t td .why{font-size:11px;color:var(--dim)}
+  .lvl{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:middle}
+  .lvl.go{background:var(--grn)} .lvl.caution{background:var(--amb)} .lvl.nogo{background:var(--red)} .lvl.none{background:var(--gry)} .lvl.na{background:transparent;border:1px solid var(--gry)}
+  .tl{overflow-x:auto}
+  .tl table{min-width:420px}
+  .tl td.lv{width:74px}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px 10px}
+  .grid2 label{font-size:12px;color:var(--dim);display:flex;flex-direction:column;gap:3px}
+  .grid2 input{width:100%}
+  textarea{font-family:var(--mono);color:var(--txt);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px;width:100%;min-height:84px}
+  details>summary{cursor:pointer;font-size:13px;color:var(--blu);margin:6px 0}
   /* 週間の地上予想図：大きい図＋時刻順のサムネイル一覧 */
   .wsMain{max-width:720px;margin:0 auto}
   .wsTag{position:absolute;right:6px;top:6px;background:rgba(255,255,255,.92);color:#0a1420;font-family:var(--mono);font-weight:600;font-size:14px;padding:2px 8px;border-radius:4px;border:1px solid #999;pointer-events:none}
@@ -153,8 +173,10 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script type="module">
+import { parseMetar, parseTaf } from './lib/metar.js';
+import { judgeMetar, judgeTaf, worst, LEVEL_JA } from './lib/judge.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p1-5', BUILD='2026-09-17';
+const VER_TAG='p2-2', BUILD='2026-09-17';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -221,7 +243,7 @@ const SCREENS=[
   {n:2,name:'レーダー実況'},
   {n:3,name:'レーダー予想'},
   {n:4,name:'経路',later:'フェーズ4'},
-  {n:5,name:'飛行場',later:'フェーズ2'},
+  {n:5,name:'飛行場'},
   {n:6,name:'鉛直構造',later:'フェーズ4'},
   {n:7,name:'明日の予想'},
   {n:8,name:'週間'},
@@ -405,25 +427,27 @@ function timeBar(root,items,onPick,{startIdx}={}){
 
 /* ═════════ 0 ホーム ═════════ */
 const JUDGE_ROWS=[
-  {n:1,name:'総観',note:'判定なし（解説のみ）'},
+  {n:1,name:'総観',note:'判定なし（解説のみ）',none:1},
   {n:2,name:'レーダー実況',note:'経路周辺の降水・雷（フェーズ4で経路と重ねて判定）'},
   {n:3,name:'レーダー予想',note:'飛行時間帯の降水予想（フェーズ4）'},
   {n:4,name:'経路',note:'区間ごと（フェーズ4）'},
-  {n:5,name:'飛行場',note:'METAR/TAFとミニマ（フェーズ2）'},
+  {n:5,name:'飛行場',note:'METAR/TAFとミニマ（飛行場ごとの最も悪い判定）'},
   {n:6,name:'鉛直構造',note:'時間帯・安定度（フェーズ4）'},
-  {n:7,name:'明日の予想',note:'判定なし（解説のみ）'},
-  {n:8,name:'週間',note:'判定なし'},
+  {n:7,name:'明日の予想',note:'判定なし（解説のみ）',none:1},
+  {n:8,name:'週間',note:'判定なし',none:1},
 ];
 async function loadHome(){
   const b=$('#scr0 .body');
   const cfg=store.get('wx.cfg')||{};
   b.innerHTML=`
   <div class="card">
-    <h3>対象<span class="sp"></span><span class="badge none">総合：データなし</span></h3>
-    <div class="row"><label>飛行予定（JST）</label><input type="datetime-local" id="cfgWhen" value="${esc(cfg.when||'')}"></div>
+    <h3>対象<span class="sp"></span><span id="jTotal"></span></h3>
+    <div class="row"><label>出発予定（JST）</label><input type="datetime-local" id="cfgWhen" value="${esc(cfg.when||'')}"></div>
+    <div class="row"><label>帰投予定（JST）</label><input type="datetime-local" id="cfgRet" value="${esc(cfg.ret||'')}"></div>
+    <div class="note" id="winNote"></div>
     <div class="row"><label>飛行場（ICAO）</label><input id="cfgAd" placeholder="例 RJTT RJTF" value="${esc(cfg.ad||'')}" style="width:14em;text-transform:uppercase"></div>
     <div class="row"><label>府県予報区</label><select id="cfgOffice"><option>読み込み中…</option></select></div>
-    <p class="note">設定はこの端末の中だけに保存します。飛行場は画面5（フェーズ2）の判定で使います。</p>
+    <p class="note">設定はこの端末の中だけに保存します。飛行場は空白区切りで入力し、画面5で判定します。</p>
   </div>
   <div class="card">
     <h3>AI 3行要約<span class="sp"></span><span class="badge none">未実装</span></h3>
@@ -431,7 +455,7 @@ async function loadHome(){
   </div>
   <div class="card">
     <h3>各画面の判定</h3>
-    <table class="t">${JUDGE_ROWS.map(r=>`<tr><td class="m" style="width:2em">${r.n}</td><td><a href="#" data-go="${r.n}">${r.name}</a><div class="note">${r.note}</div></td><td style="text-align:right"><span class="badge none">データなし</span></td></tr>`).join('')}</table>
+    <table class="t">${JUDGE_ROWS.map(r=>`<tr><td class="m" style="width:2em">${r.n}</td><td><a href="#" data-go="${r.n}">${r.name}</a><div class="note">${r.note}</div></td><td style="text-align:right" id="jb${r.n}"></td></tr>`).join('')}</table>
   </div>
   <div class="card">
     <h3>データの状態<span class="sp"></span><button id="btnReload">すべて取り直す</button></h3>
@@ -439,16 +463,23 @@ async function loadHome(){
   </div>
   <div class="card">
     <h3>外部との通信</h3>
-    <p class="note">このアプリは気象庁・国土地理院・CDN（cdnjs、Google Fonts）からデータを<b>取得するだけ</b>で、飛行場・経路・位置・設定はどこにも送りません。AI解説（フェーズ3）とMETAR/TAF（フェーズ2）を追加するときに、送る内容をここに一覧で出します。</p>
+    <table class="t">
+      <tr><th>送り先</th><th>送る内容</th></tr>
+      <tr><td>気象庁・国土地理院・CDN</td><td>取得（GET）だけ。こちらの情報は送らない</td></tr>
+      <tr><td>中継（Vercel）→ NOAA</td><td>METAR/TAFを取る飛行場のICAOコードと合言葉（POSTの本文）。「手入力のみ」にした飛行場は送らない</td></tr>
+    </table>
+    <p class="note">経路・位置・ミニマ・滑走路方位・貼り付けた電文は端末の中だけに保存し、どこにも送りません。AI解説（フェーズ3）を追加するときは、送る内容をここに書き足します。</p>
   </div>`;
   b.querySelectorAll('[data-go]').forEach(a=>a.onclick=e=>{e.preventDefault();goTo(SCREENS.findIndex(s=>s.n===+a.dataset.go))});
-  const save=()=>{store.set('wx.cfg',{when:$('#cfgWhen').value,ad:$('#cfgAd').value.toUpperCase().trim(),office:$('#cfgOffice').value})};
-  $('#cfgWhen').onchange=save;$('#cfgAd').onchange=save;
+  const save=()=>{store.set('wx.cfg',{...(store.get('wx.cfg')||{}),when:$('#cfgWhen').value,ret:$('#cfgRet').value,ad:$('#cfgAd').value.toUpperCase().replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim(),office:$('#cfgOffice').value});winNote()};
+  const winNote=()=>{const w=flightWindow();$('#winNote').textContent=`判定する時間帯：${fJst(w.from)} 〜 ${fJst(w.to)} JST${w.auto?'（出発予定が未入力のため、今から3時間）':''}`};
+  $('#cfgWhen').onchange=()=>{save();loaded.delete(5)};$('#cfgRet').onchange=()=>{save();loaded.delete(5)};$('#cfgAd').onchange=()=>{save();loaded.delete(5)};
+  winNote();renderJudges();
   $('#cfgOffice').onchange=()=>{save();loaded.delete(7);loaded.delete(8)};
   $('#btnReload').onclick=()=>{
     const keep=SCREENS[curIdx].n;
     for(const n of [...loaded]) if(n!==0) loaded.delete(n);
-    for(const n of [1,2,3,7,8]) $(`#scr${n} .body`).innerHTML='';
+    for(const n of [1,2,3,5,7,8]) $(`#scr${n} .body`).innerHTML='';
     MAPS.forEach(m=>m.remove());MAPS.length=0;SRC.clear();PDF_CACHE.clear();renderHomeStatus();
     if(keep!==0){loaded.delete(keep);activate(curIdx)}
   };
@@ -459,6 +490,28 @@ async function loadHome(){
     sel.innerHTML=Object.entries(data.centers).map(([,c])=>`<optgroup label="${esc(c.name)}">${c.children.map(code=>`<option value="${code}" ${code===cur?'selected':''}>${esc(data.offices[code]?.name||code)}</option>`).join('')}</optgroup>`).join('');
     if(!cfg.office) save();
   }catch(e){$('#cfgOffice').innerHTML='<option value="130000">東京都（一覧を取得できませんでした）</option>'}
+}
+/* 各画面の判定(ホームの一覧と総合)。判定を出していない画面は灰のまま */
+const JUDGE=new Map();
+function setJudge(n,level,note){JUDGE.set(n,{level,note});renderJudges()}
+function badge(level,prefix=''){return `<span class="badge ${level==='na'?'none':level}">${prefix}${LEVEL_JA[level]||'データなし'}</span>`}
+function renderJudges(){
+  for(const r of JUDGE_ROWS){
+    const el=document.getElementById('jb'+r.n);if(!el)continue;
+    el.innerHTML=r.none?'<span class="note">判定なし</span>':badge(JUDGE.get(r.n)?.level||'none');
+  }
+  const t=$('#jTotal');
+  if(t) t.innerHTML=badge(worst(JUDGE_ROWS.filter(r=>!r.none).map(r=>JUDGE.get(r.n)?.level||'none')),'総合：');
+}
+/* 判定する時間帯：出発予定−前の余裕 〜 帰投予定＋後の余裕(分はミニマ設定)。出発が未入力なら今から3時間 */
+function flightWindow(){
+  const cfg=store.get('wx.cfg')||{},mn=store.get('wx.minima')||{};
+  const jstInput=v=>v?new Date(v+':00+09:00'):null;
+  let dep=jstInput(cfg.when),ret=jstInput(cfg.ret),auto=false;
+  if(!dep||isNaN(dep)){dep=new Date();ret=new Date(Date.now()+3*3600e3);auto=true}
+  if(!ret||isNaN(ret)||ret<dep) ret=new Date(dep.getTime()+2*3600e3);
+  const b=+mn.beforeMin||0,a=+mn.afterMin||0;
+  return {from:new Date(dep.getTime()-b*60e3),to:new Date(ret.getTime()+a*60e3),auto};
 }
 function renderHomeStatus(){
   const el=$('#homeStatus');if(!el)return;
@@ -907,7 +960,215 @@ async function loadWeekly(){
   await chart;
 }
 
-const LOADERS={0:loadHome,1:loadSynoptic,2:loadRadarNow,3:loadRadarFcst,7:loadTomorrow,8:loadWeekly};
+/* ═════════ 5 飛行場 ═════════ */
+/* METAR/TAF：中継(ナビPWAと共用の Vercel /api/wx)で取得、または写真から文字をコピーして貼り付け。
+   デコードと判定は lib/metar.js・lib/judge.js(テスト付き)。AIは使わない */
+const NOGO_WX=[['TS','雷電'],['CB','積乱雲'],['FG','霧'],['FZ','着氷性'],['+RA','強い雨'],['SN','雪'],['GR','ひょう'],['SQ','スコール'],['FC','竜巻等'],['VA','火山灰']];
+const NOGO_WX_DEFAULT=['TS','CB','FG','FZ','+RA','SN','GR','SQ','FC','VA'];
+const MINIMA_FIELDS=[
+  ['ceilFt','雲底 ミニマ(ft)'],['ceilMarginFt','雲底 余裕幅(ft)'],['visM','視程 ミニマ(m)'],['visMarginM','視程 余裕幅(m)'],
+  ['windKt','風速 上限(kt)'],['windMarginKt','風速 余裕幅(kt)'],['xwindKt','横風 上限(kt)'],['xwindMarginKt','横風 余裕幅(kt)'],
+  ['beforeMin','出発前の余裕(分)'],['afterMin','帰投後の余裕(分)'],['spreadC','気温−露点 注意(℃)'],['metarMaxAgeMin','METARの古さ上限(分)'],
+];
+const WXDATA={relay:null,relayErr:''};
+let AIRPORTS=null; /* 気象庁の飛行場時系列予報の一覧 {ICAO:{type:'fcst'|'info',name}} */
+
+/* ⚠ 中継の設定はナビPWAと同じキー(tfcRelay)。GitHub Pages では同じオリジンなので設定を共用できる */
+function tfcRelay(){const v=store.get('tfcRelay');return v&&v.url?v:null}
+async function relayPost(path,body){
+  const R=tfcRelay();if(!R)throw new Error('中継が未設定');
+  const base=R.url.replace(/\/+$/,'').replace(/\/api\/adsb$/,'');
+  /* ⚠ 合言葉は URL に入れず本文で送る(Vercel の実行ログに残さない)。text/plain で事前確認なし */
+  const r=await fetch(base+path,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({...body,...(R.key?{k:R.key}:{})})});
+  const o=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(`${r.status} ${o.error||''}`.trim()+(o.error==='origin'?'（このアドレスからは中継を使えません。公開アドレスか localhost:8765 で使えます）':o.error==='key'?'（合言葉が違います）':''));
+  return o;
+}
+const adList=()=>((store.get('wx.cfg')||{}).ad||'').split(' ').filter(x=>/^[A-Z0-9]{4}$/.test(x));
+const adOpt=icao=>(store.get('wx.ad')||{})[icao]||{};
+function setAdOpt(icao,o){const all=store.get('wx.ad')||{};all[icao]={...all[icao],...o};store.set('wx.ad',all)}
+/* "34 16" や "340 160" → [340,160](36以下は滑走路番号とみなして10倍) */
+const runwaysOf=icao=>String(adOpt(icao).rwy||'').split(/[\s,\/]+/).filter(Boolean)
+  .map(x=>{const n=+x.replace(/[LRC]$/,'');return n<=36?(n*10)%360:n%360}).filter(n=>Number.isFinite(n));
+function splitBulletins(txt){
+  const out=[];let cur='';
+  for(const line of txt.split('\n')){
+    if(/^\s*(METAR|SPECI|TAF)\b/.test(line)){if(cur)out.push(cur);cur=line}
+    else if(cur) cur+=' '+line;
+  }
+  if(cur)out.push(cur);
+  return out.map(x=>x.replace(/\s+/g,' ').trim());
+}
+
+async function loadAirfields(){
+  const b=$('#scr5 .body'),ids=adList(),mn=store.get('wx.minima')||{},R=tfcRelay();
+  const w=flightWindow();
+  b.innerHTML=`
+  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  <div class="card">
+    <h3>飛行場の判定<span class="sp"></span><span id="adTotal"></span><button id="adReload">取り直す</button></h3>
+    <p class="note">判定する時間帯：${fJst(w.from)} 〜 ${fJst(w.to)} JST（${w.auto?'出発予定が未入力のため今から3時間。':''}ホームで変更）。METARは今の観測なので、時間帯が今から3時間以内に始まるときだけ総合に入れます。</p>
+    <div id="adStatus" class="meta"></div>
+  </div>
+  ${ids.length?'':'<div class="card"><p class="note">ホーム画面の「飛行場（ICAO）」に飛行場を入れてください。</p></div>'}
+  <div id="adCards"></div>
+  <div class="card">
+    <h3>電文を貼り付け</h3>
+    <p class="note">国際配信されない飛行場は、iPhoneの写真アプリでMETAR/TAFの文字を長押し（テキスト認識表示）してコピーし、ここに貼ります。読み取りは端末の中だけで行い、どこにも送りません。METAR・SPECI・TAF で始まる行ごとに分けるので、まとめて貼れます。</p>
+    <textarea id="pasteTxt" placeholder="METAR RJxx 170500Z 36006KT 9999 FEW020 25/16 Q1019=&#10;TAF RJxx 170505Z 1706/1812 ..."></textarea>
+    <div class="row"><button id="pasteGo">取り込む</button><span id="pasteMsg" class="note"></span></div>
+  </div>
+  <details class="card"><summary>ミニマと判定の設定</summary>
+    <p class="note">値はこの端末の中だけに保存します。空欄の項目は判定できず灰色になります。</p>
+    <div class="grid2">${MINIMA_FIELDS.map(([k,l])=>`<label>${l}<input inputmode="decimal" data-mn="${k}" value="${esc(mn[k]??'')}" placeholder="${{spreadC:'3',metarMaxAgeMin:'90',beforeMin:'0',afterMin:'0'}[k]||''}"></label>`).join('')}</div>
+    <p class="note" style="margin-top:8px">NO-GOにする天気現象（それ以外の降水・しゅう雨・周辺の現象・TCUは注意）</p>
+    <div class="row">${NOGO_WX.map(([k,l])=>`<label class="chk"><input type="checkbox" data-wx="${k}" ${(mn.nogoWx||NOGO_WX_DEFAULT).includes(k)?'checked':''}>${l}</label>`).join('')}</div>
+    <div class="row"><button id="mnSave">保存して判定し直す</button><span id="mnMsg" class="note"></span></div>
+  </details>
+  <details class="card"><summary>中継の設定（METAR/TAFの取得）</summary>
+    <p class="note">ナビPWAと同じ中継（Vercel）を使います。同じ端末で同じ公開アドレスなら、ナビPWAで設定した値がそのまま使われます。URLと合言葉は端末の中だけに保存します。</p>
+    <div class="grid2"><label>中継URL<input id="rlUrl" value="${esc(R?.url||'')}" placeholder="https://xxxx.vercel.app"></label><label>合言葉<input id="rlKey" type="password" value="${esc(R?.key||'')}"></label></div>
+    <div class="row"><button id="rlSave">保存</button><button id="rlTest">接続テスト</button><span id="rlMsg" class="note"></span></div>
+  </details>`;
+
+  $('#adReload').onclick=()=>{loaded.delete(5);activate(curIdx)};
+  $('#mnSave').onclick=()=>{
+    const o={...(store.get('wx.minima')||{})};
+    b.querySelectorAll('[data-mn]').forEach(i=>o[i.dataset.mn]=i.value.trim());
+    o.nogoWx=[...b.querySelectorAll('[data-wx]')].filter(i=>i.checked).map(i=>i.dataset.wx);
+    store.set('wx.minima',o);$('#mnMsg').textContent='保存しました';renderAdCards();
+  };
+  $('#rlSave').onclick=()=>{const url=$('#rlUrl').value.trim(),key=$('#rlKey').value;if(url)store.set('tfcRelay',{url,key});else store.del('tfcRelay');$('#rlMsg').textContent='保存しました'};
+  $('#rlTest').onclick=async()=>{$('#rlMsg').textContent='確認中…';try{const o=await relayPost('/api/wx',{ids:'RJTT'});$('#rlMsg').textContent=`つながりました（RJTT ${o.m?.RJTT?'METARあり':'METARなし'}）`}catch(e){$('#rlMsg').textContent='失敗：'+e.message}};
+  $('#pasteGo').onclick=()=>{
+    const msgs=splitBulletins($('#pasteTxt').value.replace(/\r/g,''));
+    if(!msgs.length){$('#pasteMsg').textContent='METAR / SPECI / TAF で始まる電文が見つかりません';return}
+    const man=store.get('wx.manual')||{},added=[],now=new Date().toISOString();
+    for(const raw of msgs){
+      const isTaf=/^TAF\b/.test(raw);
+      const p=isTaf?parseTaf(raw):parseMetar(raw);
+      if(!p.station) continue;
+      man[p.station]={...man[p.station],[isTaf?'taf':'metar']:{raw,at:now}};
+      added.push(`${p.station} ${isTaf?'TAF':'METAR'}`);
+      /* ホームの飛行場に無ければ足す。貼り付けで来た飛行場は外部に送らない(手入力のみ) */
+      if(!adList().includes(p.station)){const cfg=store.get('wx.cfg')||{};cfg.ad=[...adList(),p.station].join(' ');store.set('wx.cfg',cfg);setAdOpt(p.station,{manualOnly:true})}
+    }
+    store.set('wx.manual',man);
+    $('#pasteMsg').textContent=added.length?`取り込みました：${added.join('、')}`:'地点コードが読めませんでした';
+    if(added.length){$('#pasteTxt').value='';loaded.delete(5);activate(curIdx)}
+  };
+
+  /* 取得：中継は「手入力のみ」でない飛行場だけ。失敗しても前回分と手入力で判定する */
+  const remote=ids.filter(i=>!adOpt(i).manualOnly);
+  WXDATA.relayErr='';
+  if(remote.length&&R){
+    $('#adStatus').textContent='中継から取得中…';
+    try{
+      const o=await relayPost('/api/wx',{ids:remote.join(',')});
+      WXDATA.relay={...o,got:new Date().toISOString()};store.set('wx.lastRelay',WXDATA.relay);
+    }catch(e){WXDATA.relayErr=e.message}
+  }
+  if(!WXDATA.relay) WXDATA.relay=store.get('wx.lastRelay');
+  const got=WXDATA.relay?new Date(WXDATA.relay.got):null;
+  $('#adStatus').innerHTML=!remote.length?'中継から取る飛行場はありません（手入力のみ）'
+    :!R?'<span class="stale">中継が未設定です。下の「中継の設定」で入れるか、電文を貼り付けてください</span>'
+    :WXDATA.relayErr?`<span class="stale">中継の取得に失敗：${esc(WXDATA.relayErr)}${got?`（${fJst(got)} に取得した前回分を使います）`:''}</span>`
+    :`中継から取得 ${fJst(got)}`;
+  if(remote.length&&R) setStatus('metar',{label:'METAR/TAF（中継）',pubLabel:'取得',pub:got,got,offline:!!(WXDATA.relayErr&&got),staleMin:30,err:!got&&WXDATA.relayErr?WXDATA.relayErr:null});
+  renderAdCards();
+  if(!AIRPORTS){
+    try{
+      const t=await (await getRes(SRCDEF.airportTaf.list)).res.text();
+      AIRPORTS={};
+      for(const l of t.split('\n')){const [type,,icao,name]=l.split(',').map(x=>x&&x.trim());if(icao)AIRPORTS[icao]={type,name}}
+      renderAdCards();
+    }catch(e){}
+  }
+}
+
+/* METAR/TAFの元を選ぶ：中継と手入力のうち、観測・発表が新しい方 */
+function pickSources(icao){
+  const man=(store.get('wx.manual')||{})[icao]||{},rl=WXDATA.relay,opt=adOpt(icao);
+  let metar=null,taf=null;
+  const rm=!opt.manualOnly&&rl?.m?.[icao],rt=!opt.manualOnly&&rl?.t?.[icao];
+  if(rm) metar={p:parseMetar(rm.raw,{ref:new Date(rl.got)}),src:'relay',at:rl.got,hist:rm.hist||[]};
+  if(man.metar){const p=parseMetar(man.metar.raw,{ref:new Date(man.metar.at)});if(!metar||(p.time&&metar.p.time&&p.time>metar.p.time))metar={p,src:'manual',at:man.metar.at}}
+  if(rt) taf={p:parseTaf(rt.raw,{ref:new Date(rl.got)}),src:'relay',at:rl.got};
+  if(man.taf){const p=parseTaf(man.taf.raw,{ref:new Date(man.taf.at)});if(!taf||(p.issue&&taf.p.issue&&p.issue>taf.p.issue))taf={p,src:'manual',at:man.taf.at}}
+  return {metar,taf};
+}
+
+/* 原文を要素ごとに分けて表示。タップで日本語。変化群(BECMG/TEMPO/FM/PROB)の前で改行 */
+function rawHtml(p,id){
+  const html=p.parts.map((x,i)=>{
+    const br=x.kind==='change'&&i>0&&!/^PROB\d{2}$/.test(p.parts[i-1].t)?'<br>':'';
+    return `${br}<span class="tk ${x.kind}" data-i="${i}">${esc(x.t)}</span>`;
+  }).join(' ');
+  return `<div class="raw" data-raw="${id}">${html}</div><div class="tkja" id="ja_${id}">要素をタップすると日本語で出ます${p.unparsed.length?`。<span style="color:var(--amb)">未解析 ${p.unparsed.length}件：${esc(p.unparsed.join(' '))}</span>`:''}</div>`;
+}
+function bindRaw(root,p,id){
+  const el=root.querySelector(`[data-raw="${id}"]`);if(!el)return;
+  el.onclick=e=>{
+    const t=e.target.closest('.tk');if(!t)return;
+    el.querySelectorAll('.tk').forEach(x=>x.classList.toggle('on',x===t));
+    const x=p.parts[+t.dataset.i];document.getElementById('ja_'+id).textContent=`${x.t} → ${x.ja}`;
+  };
+}
+function itemsTable(items){
+  return `<table class="t">${items.map(i=>`<tr><td style="width:6.5em"><span class="lvl ${i.level}"></span>${esc(i.label)}</td><td class="m">${esc(i.value)}${i.why?`<div class="why">${esc(i.why)}</div>`:''}</td><td style="text-align:right;width:5.5em">${i.level==='na'?'<span class="note">対象外</span>':badge(i.level)}</td></tr>`).join('')}</table>`;
+}
+
+function renderAdCards(){
+  const box=$('#adCards');if(!box)return;
+  const ids=adList(),mn=store.get('wx.minima')||{},w=flightWindow(),now=new Date();
+  /* METARは今の観測。判定の時間帯が3時間以上先なら総合に入れない */
+  const metarCounts=w.from-now<3*3600e3&&w.to>now;
+  const levels=[];
+  box.innerHTML=ids.map(icao=>`<div class="card" id="ad_${icao}"></div>`).join('');
+  for(const icao of ids){
+    const card=document.getElementById('ad_'+icao),opt=adOpt(icao),rw=runwaysOf(icao);
+    const {metar,taf}=pickSources(icao);
+    const jm=metar?judgeMetar(metar.p,mn,{runways:rw,now}):null;
+    const jt=taf?judgeTaf(taf.p,mn,{runways:rw,from:w.from,to:w.to}):null;
+    const lv=worst([metarCounts?(jm?.level||'none'):'na',jt?.level||'none']);
+    levels.push(lv);
+    const ap=AIRPORTS?.[icao];
+    const srcTag=x=>x.src==='manual'?`<span class="srcTag manual">手入力 ${fJst(new Date(x.at))}取込</span>`:'<span class="srcTag">中継</span>';
+    card.innerHTML=`
+      <h3>${icao}${ap?` <span class="note">${esc(ap.name)}</span>`:''}<span class="sp"></span>${badge(lv)}</h3>
+      <div class="row">
+        <label class="chk" style="min-width:0">滑走路方位 <input data-rwy value="${esc(opt.rwy||'')}" placeholder="例 34 16" style="width:7em"></label>
+        <label class="chk" style="min-width:0"><input type="checkbox" data-mo ${opt.manualOnly?'checked':''}>手入力のみ（中継に送らない）</label>
+      </div>
+      <h3 style="margin-top:10px">METAR<span class="sp"></span>${metar?srcTag(metar):''}${jm?badge(metarCounts?jm.level:'na'):''}</h3>
+      ${metar?`<div class="meta">観測 ${metar.p.time?`${fBoth(metar.p.time)}（${ago(metar.p.time)}）`:'時刻不明'}${metarCounts?'':' ・判定の時間帯が先なので総合には入れていません'}</div>
+        ${rawHtml(metar.p,'m_'+icao)}${itemsTable(jm.items)}
+        ${metar.hist?.length?`<details><summary>過去3時間のMETAR</summary><div class="raw" style="line-height:1.6">${metar.hist.map(h=>esc(h.raw)).join('<br>')}</div></details>`:''}`
+        :`<p class="note">METARがありません。${opt.manualOnly?'':'国際配信されていない飛行場の可能性があります。'}電文を貼り付けてください。</p>`}
+      <h3 style="margin-top:10px">TAF<span class="sp"></span>${taf?srcTag(taf):''}${jt?badge(jt.level):''}</h3>
+      ${taf?`<div class="meta">発表 ${taf.p.issue?fBoth(taf.p.issue):'不明'} ・有効 ${taf.p.from?`${fJst(taf.p.from)}〜${fJst(taf.p.to)} JST`:'不明'}</div>
+        ${rawHtml(taf.p,'t_'+icao)}
+        <div class="tl"><table class="t"><tr><th>JST</th><th>判定</th><th>引っかかった要素</th></tr>${jt.slots.map(s=>`<tr><td class="m" style="white-space:nowrap">${fJst(s.from).slice(6)}</td><td class="lv">${badge(s.level)}</td><td>${s.hits.length?s.hits.map(h=>`<div><span class="lvl ${h.level}"></span>${esc(h.src)}：${esc(h.label)} ${esc(h.value)}<span class="why"> ${esc(h.why)}</span></div>`).join(''):'<span class="note">なし</span>'}</td></tr>`).join('')}</table></div>`
+        :'<p class="note">TAFがありません。</p>'}
+      ${ap?`<details data-ts><summary>気象庁 飛行場時系列${ap.type==='fcst'?'予報':'情報'}（${esc(ap.name)}）</summary><div data-tsbox></div></details>`:''}`;
+    if(metar) bindRaw(card,metar.p,'m_'+icao);
+    if(taf) bindRaw(card,taf.p,'t_'+icao);
+    card.querySelector('[data-rwy]').onchange=e=>{setAdOpt(icao,{rwy:e.target.value.trim()});renderAdCards()};
+    card.querySelector('[data-mo]').onchange=e=>{setAdOpt(icao,{manualOnly:e.target.checked});loaded.delete(5);activate(curIdx)};
+    const ts=card.querySelector('[data-ts]');
+    if(ts) ts.addEventListener('toggle',()=>{
+      const bx=ts.querySelector('[data-tsbox]');if(!ts.open||bx.dataset.done)return;bx.dataset.done=1;
+      const id='ts_'+icao;bx.innerHTML=figHtml(id,`飛行場時系列${ap.type==='fcst'?'予報':'情報'} ${ap.name}`);
+      const url=SRCDEF.airportTaf.image.replace('{type}',ap.type==='fcst'?'QMCD98':'QMCJ98').replace('{icao}',icao);
+      getRes(url).then(async r=>setFigImg(id,URL.createObjectURL(await r.res.blob()))).catch(e=>setFigErr(id,e.message,SRCDEF.airportTaf.page));
+    });
+  }
+  const total=ids.length?worst(levels):'none';
+  const t=$('#adTotal');if(t)t.innerHTML=badge(total);
+  setJudge(5,total);
+}
+
+const LOADERS={0:loadHome,1:loadSynoptic,2:loadRadarNow,3:loadRadarFcst,5:loadAirfields,7:loadTomorrow,8:loadWeekly};
 
 /* ───────── 時計・通信状態 ───────── */
 function tick(){
@@ -927,6 +1188,8 @@ async function init(){
   const start=Math.min(store.get('wx.screen')??0,SCREENS.length-1);
   /* ホームは設定(府県予報区など)を持つので、どの画面から始めても先に作る */
   if(start!==0){loaded.add(0);loadHome()}
+  /* 飛行場の判定はホームの総合に要るので、画面5を開かなくても起動時に作っておく */
+  if(start!==5&&adList().length){loaded.add(5);loadAirfields().catch(e=>console.error(e))}
   /* ⚠ requestAnimationFrame は画面が隠れていると呼ばれず、最初の画面が読み込まれないままになる */
   $('#deck').scrollLeft=start*$('#deck').clientWidth;activate(start);
   if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
