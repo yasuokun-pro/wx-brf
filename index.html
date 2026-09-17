@@ -100,6 +100,10 @@
   .raw .tk.unparsed{color:var(--amb);border-bottom:1px dashed var(--amb)}
   .raw .tk.change{color:var(--mag)}
   .tkja{font-size:12px;color:var(--cyn);min-height:1.6em;margin:4px 2px}
+  /* VMC/IMC は判定バッジ(塗り)と区別するため枠線だけ */
+  .fr{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 7px;border-radius:4px;border:1.5px solid;white-space:nowrap}
+  .fr.vmc{color:var(--grn);border-color:var(--grn)} .fr.imc{color:var(--red);border-color:var(--red)} .fr.unk{color:var(--gry);border-color:var(--gry)}
+  .fr.sub{font-size:10px;padding:0 5px;border-style:dashed}
   .srcTag{font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:4px;border:1px solid var(--line);color:var(--dim)}
   .srcTag.manual{color:var(--mag);border-color:var(--mag)}
   table.t td .why{font-size:11px;color:var(--dim)}
@@ -176,7 +180,7 @@
 import { parseMetar, parseTaf } from './lib/metar.js';
 import { judgeMetar, judgeTaf, worst, LEVEL_JA } from './lib/judge.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p2-2', BUILD='2026-09-17';
+const VER_TAG='p2-3', BUILD='2026-09-17';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -968,6 +972,7 @@ const NOGO_WX_DEFAULT=['TS','CB','FG','FZ','+RA','SN','GR','SQ','FC','VA'];
 const MINIMA_FIELDS=[
   ['ceilFt','雲底 ミニマ(ft)'],['ceilMarginFt','雲底 余裕幅(ft)'],['visM','視程 ミニマ(m)'],['visMarginM','視程 余裕幅(m)'],
   ['windKt','風速 上限(kt)'],['windMarginKt','風速 余裕幅(kt)'],['xwindKt','横風 上限(kt)'],['xwindMarginKt','横風 余裕幅(kt)'],
+  ['vmcCeilFt','VMC 雲高の基準(ft)'],['vmcVisM','VMC 地上視程の基準(m)'],
   ['beforeMin','出発前の余裕(分)'],['afterMin','帰投後の余裕(分)'],['spreadC','気温−露点 注意(℃)'],['metarMaxAgeMin','METARの古さ上限(分)'],
 ];
 const WXDATA={relay:null,relayErr:''};
@@ -1020,7 +1025,8 @@ async function loadAirfields(){
   </div>
   <details class="card"><summary>ミニマと判定の設定</summary>
     <p class="note">値はこの端末の中だけに保存します。空欄の項目は判定できず灰色になります。</p>
-    <div class="grid2">${MINIMA_FIELDS.map(([k,l])=>`<label>${l}<input inputmode="decimal" data-mn="${k}" value="${esc(mn[k]??'')}" placeholder="${{spreadC:'3',metarMaxAgeMin:'90',beforeMin:'0',afterMin:'0'}[k]||''}"></label>`).join('')}</div>
+    <div class="grid2">${MINIMA_FIELDS.map(([k,l])=>`<label>${l}<input inputmode="decimal" data-mn="${k}" value="${esc(mn[k]??'')}" placeholder="${{spreadC:'3',metarMaxAgeMin:'90',beforeMin:'0',afterMin:'0',vmcCeilFt:'1000',vmcVisM:'5000'}[k]||''}"></label>`).join('')}</div>
+    <p class="note" style="margin-top:6px">VMC/IMCの既定は、航空法施行規則第5条の管制圏内の飛行場で離着陸するときの基準（雲高300m≒1,000ft以上・地上視程5km以上）。空域や高度で基準が違うので、使う場面に合わせて変えてください。雲からの距離など、地上の観測では決まらない条件は見ていません。</p>
     <p class="note" style="margin-top:8px">NO-GOにする天気現象（それ以外の降水・しゅう雨・周辺の現象・TCUは注意）</p>
     <div class="row">${NOGO_WX.map(([k,l])=>`<label class="chk"><input type="checkbox" data-wx="${k}" ${(mn.nogoWx||NOGO_WX_DEFAULT).includes(k)?'checked':''}>${l}</label>`).join('')}</div>
     <div class="row"><button id="mnSave">保存して判定し直す</button><span id="mnMsg" class="note"></span></div>
@@ -1086,6 +1092,11 @@ async function loadAirfields(){
   }
 }
 
+function frChip(f,sub){
+  if(!f) return '';
+  const c=f.rule==='VMC'?'vmc':f.rule==='IMC'?'imc':'unk';
+  return `<span class="fr ${c}${sub?' sub':''}" title="${esc(f.why||'')}">${sub?esc(sub)+' ':''}${f.rule||'VMC/IMC不明'}</span>`;
+}
 /* METAR/TAFの元を選ぶ：中継と手入力のうち、観測・発表が新しい方 */
 function pickSources(icao){
   const man=(store.get('wx.manual')||{})[icao]||{},rl=WXDATA.relay,opt=adOpt(icao);
@@ -1118,6 +1129,15 @@ function itemsTable(items){
   return `<table class="t">${items.map(i=>`<tr><td style="width:6.5em"><span class="lvl ${i.level}"></span>${esc(i.label)}</td><td class="m">${esc(i.value)}${i.why?`<div class="why">${esc(i.why)}</div>`:''}</td><td style="text-align:right;width:5.5em">${i.level==='na'?'<span class="note">対象外</span>':badge(i.level)}</td></tr>`).join('')}</table>`;
 }
 
+/* 判定の時間帯のうち、IMCになる時間があるか(本体とTEMPO・PROBを分けて出す) */
+function tafFrSummary(jt){
+  const sl=jt.slots.filter(s=>s.covered);
+  if(!sl.length) return frChip({rule:null,why:'有効期間外'});
+  if(sl.some(s=>s.flight.rule==='IMC')) return frChip({rule:'IMC',why:'時間帯の中に本体でIMCの時間がある'});
+  if(sl.some(s=>s.flight.rule==null)) return frChip({rule:null,why:'欠測の時間がある'});
+  if(sl.some(s=>s.flight.tempo)) return frChip({rule:'VMC',why:'本体はVMC、TEMPO・PROBでIMCの時間がある'})+frChip({rule:'IMC',why:''},'一時');
+  return frChip({rule:'VMC',why:'時間帯を通してVMC'});
+}
 function renderAdCards(){
   const box=$('#adCards');if(!box)return;
   const ids=adList(),mn=store.get('wx.minima')||{},w=flightWindow(),now=new Date();
@@ -1140,15 +1160,15 @@ function renderAdCards(){
         <label class="chk" style="min-width:0">滑走路方位 <input data-rwy value="${esc(opt.rwy||'')}" placeholder="例 34 16" style="width:7em"></label>
         <label class="chk" style="min-width:0"><input type="checkbox" data-mo ${opt.manualOnly?'checked':''}>手入力のみ（中継に送らない）</label>
       </div>
-      <h3 style="margin-top:10px">METAR<span class="sp"></span>${metar?srcTag(metar):''}${jm?badge(metarCounts?jm.level:'na'):''}</h3>
-      ${metar?`<div class="meta">観測 ${metar.p.time?`${fBoth(metar.p.time)}（${ago(metar.p.time)}）`:'時刻不明'}${metarCounts?'':' ・判定の時間帯が先なので総合には入れていません'}</div>
+      <h3 style="margin-top:10px">METAR<span class="sp"></span>${metar?srcTag(metar):''}${jm?frChip(jm.flight):''}${jm?badge(metarCounts?jm.level:'na'):''}</h3>
+      ${metar?`<div class="meta">観測 ${metar.p.time?`${fBoth(metar.p.time)}（${ago(metar.p.time)}）`:'時刻不明'}${metarCounts?'':' ・判定の時間帯が先なので総合には入れていません'}<br>${jm.flight.rule||'VMC/IMC不明'}：${esc(jm.flight.why)}</div>
         ${rawHtml(metar.p,'m_'+icao)}${itemsTable(jm.items)}
         ${metar.hist?.length?`<details><summary>過去3時間のMETAR</summary><div class="raw" style="line-height:1.6">${metar.hist.map(h=>esc(h.raw)).join('<br>')}</div></details>`:''}`
         :`<p class="note">METARがありません。${opt.manualOnly?'':'国際配信されていない飛行場の可能性があります。'}電文を貼り付けてください。</p>`}
-      <h3 style="margin-top:10px">TAF<span class="sp"></span>${taf?srcTag(taf):''}${jt?badge(jt.level):''}</h3>
+      <h3 style="margin-top:10px">TAF<span class="sp"></span>${taf?srcTag(taf):''}${jt?tafFrSummary(jt):''}${jt?badge(jt.level):''}</h3>
       ${taf?`<div class="meta">発表 ${taf.p.issue?fBoth(taf.p.issue):'不明'} ・有効 ${taf.p.from?`${fJst(taf.p.from)}〜${fJst(taf.p.to)} JST`:'不明'}</div>
         ${rawHtml(taf.p,'t_'+icao)}
-        <div class="tl"><table class="t"><tr><th>JST</th><th>判定</th><th>引っかかった要素</th></tr>${jt.slots.map(s=>`<tr><td class="m" style="white-space:nowrap">${fJst(s.from).slice(6)}</td><td class="lv">${badge(s.level)}</td><td>${s.hits.length?s.hits.map(h=>`<div><span class="lvl ${h.level}"></span>${esc(h.src)}：${esc(h.label)} ${esc(h.value)}<span class="why"> ${esc(h.why)}</span></div>`).join(''):'<span class="note">なし</span>'}</td></tr>`).join('')}</table></div>`
+        <div class="tl"><table class="t"><tr><th>JST</th><th>判定</th><th>気象状態</th><th>引っかかった要素</th></tr>${jt.slots.map(s=>`<tr><td class="m" style="white-space:nowrap">${fJst(s.from).slice(6)}</td><td class="lv">${badge(s.level)}</td><td style="white-space:nowrap">${frChip(s.flight)}${s.flight.tempo?`<br>${frChip({rule:'IMC',why:''},s.flight.tempoSrc)}`:''}</td><td>${s.hits.length?s.hits.map(h=>`<div><span class="lvl ${h.level}"></span>${esc(h.src)}：${esc(h.label)} ${esc(h.value)}<span class="why"> ${esc(h.why)}</span></div>`).join(''):'<span class="note">なし</span>'}</td></tr>`).join('')}</table></div>`
         :'<p class="note">TAFがありません。</p>'}
       ${ap?`<details data-ts><summary>気象庁 飛行場時系列${ap.type==='fcst'?'予報':'情報'}（${esc(ap.name)}）</summary><div data-tsbox></div></details>`:''}`;
     if(metar) bindRaw(card,metar.p,'m_'+icao);
