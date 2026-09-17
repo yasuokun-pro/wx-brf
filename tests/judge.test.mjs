@@ -162,33 +162,48 @@ test('FM が時間の途中なら、その時間は変化前後の両方を見�
   assert.equal(sl[1].states[0].wind.dir, 180);
 });
 
-test('VMC/IMC：既定は雲高1000ft・地上視程5000m（管制圏内の飛行場）', () => {
+test('VMC/SVFR/IMC：既定は雲高1000ft・地上視程5000mでVMC、IMCのうち地上視程1500m以上はSVFR', () => {
   const P = raw => parseMetar(raw, { ref: REF });
-  assert.equal(flightRule(P('METAR RJTT 170530Z 06010KT 9999 FEW025 24/15 Q1019')).rule, 'VMC');
-  assert.equal(flightRule(P('METAR RJTT 170530Z 06010KT CAVOK 24/15 Q1019')).rule, 'VMC');
+  const R = (raw, mn) => flightRule(P(raw), mn).rule;
+  assert.equal(R('METAR RJTT 170530Z 06010KT 9999 FEW025 24/15 Q1019'), 'VMC');
+  assert.equal(R('METAR RJTT 170530Z 06010KT CAVOK 24/15 Q1019'), 'VMC');
   /* 境界：ちょうど1000ft・5000mはVMC */
-  assert.equal(flightRule(P('METAR RJTT 170530Z 06010KT 5000 BR BKN010 20/18 Q1019')).rule, 'VMC');
-  assert.equal(flightRule(P('METAR RJTT 170530Z 06010KT 9999 BKN009 20/15 Q1019')).rule, 'IMC');
-  assert.equal(flightRule(P('METAR RJTT 170530Z 06010KT 4900 BR FEW010 20/18 Q1019')).rule, 'IMC');
-  assert.equal(flightRule(P('METAR RJTT 170530Z 00000KT 0200 FG VV001 15/15 Q1019')).rule, 'IMC');
+  assert.equal(R('METAR RJTT 170530Z 06010KT 5000 BR BKN010 20/18 Q1019'), 'VMC');
+  /* 雲高だけ足りない → 視程が十分なのでSVFR */
+  assert.equal(R('METAR RJTT 170530Z 06010KT 9999 BKN009 20/15 Q1019'), 'SVFR');
+  assert.equal(R('METAR RJTT 170530Z 06010KT 4900 BR FEW010 20/18 Q1019'), 'SVFR');
+  /* SVFRの境界：ちょうど1500mはSVFR、1499m相当(1400m)はIMC */
+  assert.equal(R('METAR RJTT 170530Z 06010KT 1500 BR BKN004 20/19 Q1019'), 'SVFR');
+  assert.equal(R('METAR RJTT 170530Z 06010KT 1400 BR BKN004 20/19 Q1019'), 'IMC');
+  assert.equal(R('METAR RJTT 170530Z 00000KT 0200 FG VV001 15/15 Q1019'), 'IMC');
+  /* SM表記：1SM(1609m)はSVFR */
+  assert.equal(R('METAR RJTY 170530Z 00000KT 1SM BR OVC003 15/15 A2990'), 'SVFR');
   /* SCT の低い雲は雲高にならない */
-  assert.equal(flightRule(P('METAR RJTT 170530Z 06010KT 9999 SCT005 20/15 Q1019')).rule, 'VMC');
-  /* 欠測：分かっている要素でIMCならIMC、それ以外は不明 */
-  assert.equal(flightRule(P('METAR RJTF 170500Z AUTO /////KT //// ////// 20/10 Q////')).rule, null);
-  assert.equal(flightRule(P('METAR RJTF 170500Z 36005KT 3000 BR ////// 20/19 Q1019')).rule, 'IMC');
+  assert.equal(R('METAR RJTT 170530Z 06010KT 9999 SCT005 20/15 Q1019'), 'VMC');
+  /* 欠測：雲も視程も不明なら不明。視程3000mが分かれば雲が欠測でもVMCではなく、SVFR */
+  assert.equal(R('METAR RJTF 170500Z AUTO /////KT //// ////// 20/10 Q////'), null);
+  assert.equal(R('METAR RJTF 170500Z 36005KT 3000 BR ////// 20/19 Q1019'), 'SVFR');
+  /* 雲高がIMCで視程が欠測 → IMC(SVFRかどうか分からない) */
+  const u = flightRule(P('METAR RJTF 170500Z 36005KT //// BKN005 20/19 Q1019'));
+  assert.equal(u.rule, 'IMC');
+  assert.match(u.why, /SVFR/);
   /* 基準は設定で変えられる */
-  assert.equal(flightRule(P('METAR RJTT 170530Z 06010KT 9999 BKN009 20/15 Q1019'), { vmcCeilFt: 500, vmcVisM: 1500 }).rule, 'VMC');
+  assert.equal(R('METAR RJTT 170530Z 06010KT 9999 BKN009 20/15 Q1019', { vmcCeilFt: 500, vmcVisM: 1500 }), 'VMC');
+  assert.equal(R('METAR RJTT 170530Z 06010KT 1400 BR BKN004 20/19 Q1019', { svfrVisM: 800 }), 'SVFR');
 });
 
-test('VMC/IMC：METAR判定とTAFの時間ごとに付く', () => {
-  const r = J('METAR RJTT 170530Z 06010KT 9999 BKN008 24/15 Q1019');
-  assert.equal(r.flight.rule, 'IMC');
-  const t = parseTaf(TAF, { ref: REF });
+test('VMC/SVFR/IMC：METAR判定とTAFの時間ごとに付く', () => {
+  assert.equal(J('METAR RJTT 170530Z 06010KT 9999 BKN008 24/15 Q1019').flight.rule, 'SVFR');
+  assert.equal(J('METAR RJTT 170530Z 00000KT 0800 FG BKN002 15/15 Q1019').flight.rule, 'IMC');
+  const t = parseTaf(TAF + ' TEMPO 1720/1722 1000 BR BKN003', { ref: REF });
   const jt = judgeTaf(t, MIN, { from: new Date(Date.UTC(2026, 8, 17, 8)), to: new Date(Date.UTC(2026, 8, 18, 5)) });
-  const slot = h => jt.slots.find(s => s.from.getTime() === h);
-  assert.deepEqual([slot(Date.UTC(2026, 8, 17, 8)).flight.rule, slot(Date.UTC(2026, 8, 17, 8)).flight.tempo], ['VMC', null]);
-  /* 本体はVMCでも TEMPO 3000m BKN008 は IMC */
-  assert.deepEqual([slot(Date.UTC(2026, 8, 17, 13)).flight.rule, slot(Date.UTC(2026, 8, 17, 13)).flight.tempo], ['VMC', 'IMC']);
-  /* FM 以降の BKN005 は本体がIMC */
-  assert.equal(slot(Date.UTC(2026, 8, 18, 3)).flight.rule, 'IMC');
+  const f = h => { const s = jt.slots.find(x => x.from.getTime() === h).flight; return [f0(s.rule), f0(s.tempo)]; };
+  const f0 = x => x ?? null;
+  assert.deepEqual(f(Date.UTC(2026, 8, 17, 8)), ['VMC', null]);
+  /* 本体はVMC、TEMPO 3000m BKN008 は SVFR */
+  assert.deepEqual(f(Date.UTC(2026, 8, 17, 13)), ['VMC', 'SVFR']);
+  /* 21Z：TEMPO 3000m と TEMPO 1000m が重なる → 一時の悪い方 IMC */
+  assert.deepEqual(f(Date.UTC(2026, 8, 17, 21)), ['VMC', 'IMC']);
+  /* FM 以降の BKN005 9999 は本体がSVFR */
+  assert.deepEqual(f(Date.UTC(2026, 8, 18, 3)), ['SVFR', null]);
 });
