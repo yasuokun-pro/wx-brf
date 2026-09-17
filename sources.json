@@ -240,14 +240,12 @@
     },
     "weeklySfc": {
       "id": "feassfc",
-      "name": "地上予想図（週間） 地上気圧・850hPa気温",
+      "name": "地上予想図（週間） 日本付近",
       "tag": "地上",
-      "crop": "lower",
       "hh": [
         "12"
       ],
       "staleMin": 1800,
-      "dateLabels": true,
       "variants": [
         {
           "id": "feas502",
@@ -316,7 +314,23 @@
           ]
         }
       ],
-      "_note": "気象庁は3日目以降の地上予想天気図(カラー)を公開していないため、FEAS5xx の下段(地上気圧・850hPa気温)を切り出して使う"
+      "_note": "気象庁は3日目以降の地上予想天気図を公開していないため、FEAS5xx の下段(地上気圧・850hPa気温)の日本付近を切り出し、気象庁の実況・24h・48h天気図と時刻順に並べる",
+      "geo": {
+        "_note": "FEAS5xx 下段の図法(PDFの座標pt)。北極中心のステレオ図法：r=k*tan((90-緯度)/2)、中心経線 lon0 が真下。2026-09-17 に経線の交点と緯線の半径から求め、海岸線との一致を確認",
+        "pageWidth": 725.67,
+        "pole": [
+          326.54,
+          497.11
+        ],
+        "k": 561.7,
+        "lon0": 100,
+        "box": [
+          380,
+          600,
+          655,
+          862
+        ]
+      }
     }
   },
   "weekly": {
@@ -336,5 +350,6 @@
     "tile": "https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png",
     "attribution": "地理院タイル",
     "maxNativeZoom": 18
-  }
+  },
+  "japanOutline": "japan.json"
 }
