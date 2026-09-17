@@ -123,7 +123,7 @@
   .wsGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(74px,1fr));gap:5px;margin-top:10px}
   .wsT{padding:0;background:var(--panel2);border:2px solid transparent;border-radius:6px;overflow:hidden;display:flex;flex-direction:column}
   .wsT.sel{border-color:var(--amb)}
-  .wsT .im{aspect-ratio:275/262;background:#fff;display:flex;align-items:center;justify-content:center;color:var(--gry);font-size:11px}
+  .wsT .im{aspect-ratio:300/290;background:#fff;display:flex;align-items:center;justify-content:center;color:var(--gry);font-size:11px}
   .wsT img{width:100%;height:100%;object-fit:cover;display:block}
   .wsT span{font-family:var(--mono);font-size:10px;padding:3px 1px 1px;text-align:center;white-space:nowrap;letter-spacing:-.02em}
   .wsT .sat{color:var(--cyn)} .wsT .sun{color:#ff8a8a}
@@ -180,7 +180,7 @@
 import { parseMetar, parseTaf } from './lib/metar.js';
 import { judgeMetar, judgeTaf, worst, LEVEL_JA, FR_RANK } from './lib/judge.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p2-4', BUILD='2026-09-17';
+const VER_TAG='p2-5', BUILD='2026-09-17';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -595,7 +595,10 @@ function nwpCardHtml(g){
   return `<div class="card"><h3>${esc(g.name)}${seg}</h3>${metaEl('nwp_'+g.id)}<div class="meta" id="vt_${g.id}"></div><div id="box_${g.id}">${figHtml('fig_'+g.id,g.name)}</div></div>`;
 }
 /* FEAS5xx 下段の日本付近を切り出し、日本を赤で強調する。
-   図法は sources.json の geo(北極中心のステレオ図法、PDFの座標pt)。位置は計算で決めるので図ごとの検出はしない */
+   図法は sources.json の geo(北極中心のステレオ図法、PDFの座標pt)。位置は計算で決めるので図ごとの検出はしない。
+   ⚠ FEAS は東経100度が真下、気象庁の天気図は東経140度が真上。ステレオ図法は北極の周りに回すと中心経線を
+     変えたのと同じになるので、(viewLon0−lon0)度だけ回してから切り出し、天気図と同じ向きで気圧の動きを追えるようにする。
+     回すと元の図の外になる隅(箱の約2%)は白で埋める */
 let JAPAN=null;
 async function japanOutline(){if(!JAPAN)JAPAN=(await getJSON(SRCDEF.japanOutline)).data;return JAPAN}
 function loadImg(src){const i=new Image();i.src=src;return i.decode().then(()=>i)}
@@ -603,9 +606,16 @@ async function japanView(c,geo){
   if(c.jp) return c.jp;
   const [img,jp]=await Promise.all([loadImg(c.imgs[0]),japanOutline()]);
   const s=img.naturalWidth/geo.pageWidth,[x0,y0,x1,y1]=geo.box,D=Math.PI/180;
+  const view=geo.viewLon0??geo.lon0,[px,py]=geo.pole;
   const cv=document.createElement('canvas');cv.width=Math.round((x1-x0)*s);cv.height=Math.round((y1-y0)*s);
-  const ctx=cv.getContext('2d');ctx.drawImage(img,-x0*s,-y0*s);
-  const pt=(lon,lat)=>{const r=geo.k*Math.tan((90-lat)/2*D),t=(90-(lon-geo.lon0))*D;return [(geo.pole[0]+r*Math.cos(t)-x0)*s,(geo.pole[1]+r*Math.sin(t)-y0)*s]};
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.save();
+  /* 北極を中心に回す：経度が(view−lon0)度大きい点が真下に来る＝画面上で時計回り */
+  ctx.translate((px-x0)*s,(py-y0)*s);ctx.rotate((view-geo.lon0)*D);ctx.translate(-px*s,-py*s);
+  ctx.drawImage(img,0,0);
+  ctx.restore();
+  const pt=(lon,lat)=>{const r=geo.k*Math.tan((90-lat)/2*D),t=(90-(lon-view))*D;return [(px+r*Math.cos(t)-x0)*s,(py+r*Math.sin(t)-y0)*s]};
   ctx.beginPath();
   for(const ring of jp){ring.forEach(([lon,lat],k)=>{const [x,y]=pt(lon,lat);k?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.closePath()}
   /* 塗りは乗算で重ねて、等圧線の黒を薄くしない */
@@ -903,6 +913,11 @@ async function loadWeeklySfcGrid(){
       tiles.push({kind:'jma',hrs,file,valid:new Date(jmaTime(m[2]).getTime()+hrs*3600e3),title:`気象庁 ${hrs?hrs+'h予想天気図':'実況天気図'}`});
     }
   }catch(e){}
+  /* 気象庁の天気図(実況・24h・48h)がある日付(JST)の週間天気図は並べない。重なると同じ日が2種類の図で出て、動きを追いにくい */
+  const dayKey=d=>{const j=jst(d);return j.mo*100+j.d};
+  const jmaLast=Math.max(0,...tiles.filter(t=>t.kind==='jma').map(t=>dayKey(t.valid)));
+  const dropFeas=()=>{if(!jmaLast)return;for(let i=tiles.length-1;i>=0;i--){const t=tiles[i];if(t.kind==='feas'&&dayKey(t.valid)<=jmaLast&&!(t===sel))tiles.splice(i,1)}};
+  dropFeas();
   sel=sorted()[0];draw();pick(sel);
 
   for(const t of tiles.filter(t=>t.kind==='jma')){
@@ -914,6 +929,8 @@ async function loadWeeklySfcGrid(){
     try{
       const c=await fetchNwp(G,t.v);
       if(c.init){t.init=c.init;t.valid=new Date(c.init.getTime()+t.v.ft[0]*3600e3)}
+      /* 仮に置いた初期値がずれていて、実際は天気図と同じ日付だった場合はここで外す */
+      if(jmaLast&&dayKey(t.valid)<=jmaLast&&t!==sel){tiles.splice(tiles.indexOf(t),1);draw();continue}
       t.src=await japanView(c,G.geo);
       if(first){first=false;setStatus('wsfc',{pub:c.lastModified,got:c.got,offline:c.offline})}
     }catch(e){t.err=e.message;if(first)setStatus('wsfc',{err:e.message})}
@@ -933,7 +950,7 @@ async function loadWeekly(){
       <div class="tbar"><button id="wsPrev">◀</button><span class="tlabel" id="wsInfo" style="flex:1;text-align:center;min-width:0"></span><button id="wsNext">▶</button></div>
     </div>
     <div class="wsGrid" id="wsGrid"></div>
-    <p class="note">前半の水色の時刻は気象庁の天気図（実況・24h・48h予想。前線入り）。後半は週間天気図（FEAS）の下段「地上気圧・850hPa気温」の日本付近を切り出し、日本を赤で強調したもの（前線は描かれていません）。気象庁は3日目以降の地上予想天気図を公開していません。</p>
+    <p class="note">前半の水色の時刻は気象庁の天気図（実況・24h・48h予想。前線入り）。後半はその翌日からの週間天気図（FEAS）の下段「地上気圧・850hPa気温」の日本付近で、天気図と同じ向き（東経140度が真上）に回して日本を赤で強調したもの（前線は描かれていません）。気象庁は3日目以降の地上予想天気図を公開していません。</p>
   </div>
   ${nwpCardHtml(P.weekly)}
   <div class="card"><h3>週間天気予報</h3>${metaEl('wk')}<div id="fcWeek" class="wk loading">読み込み中…</div>
