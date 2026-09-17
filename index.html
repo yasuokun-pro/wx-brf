@@ -154,7 +154,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script type="module">
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p1-4', BUILD='2026-09-17';
+const VER_TAG='p1-5', BUILD='2026-09-17';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -805,13 +805,14 @@ async function loadShortForecast(){
 }
 
 /* ═════════ 8 週間 ═════════ */
-/* 地上予想図の一覧。気象庁の天気図(実況・24h・48h)と FEAS の日本付近を対象時刻の順に並べ、
-   サムネイルを押すと上の大きい図が切り替わる(気圧配置の動きを一目で追うため) */
+/* 地上予想図の一覧。気象庁の天気図(実況・24h・48h)→ FEAS の日本付近 の順に、それぞれ対象時刻順で並べ、
+   サムネイルを押すと上の大きい図が切り替わる。
+   ⚠ 両者を時刻順に混ぜると図の種類が交互に替わり、気圧配置の動きが追えない(ユーザー指摘)ので種類ごとにまとめる */
 async function loadWeeklySfcGrid(){
   const P=SRCDEF.nwpPdf,G=P.weeklySfc,WM=SRCDEF.weatherMap;
   const tiles=[];let sel=null;
   const lab=d=>{const j=jst(d);return `${j.d}(<b class="${j.wd===6?'sat':j.wd===0?'sun':''}" style="font-weight:400">${WD[j.wd]}</b>) ${j.h}時`};
-  const sorted=()=>tiles.filter(t=>t.valid).sort((a,b)=>a.valid-b.valid);
+  const sorted=()=>tiles.filter(t=>t.valid).sort((a,b)=>(a.kind==='jma'?0:1)-(b.kind==='jma'?0:1)||a.valid-b.valid);
   const draw=()=>{
     const list=sorted();
     $('#wsGrid').innerHTML=list.map((t,i)=>`<button class="wsT ${t===sel?'sel':''}" data-i="${i}"><div class="im">${t.src?`<img src="${t.src}" alt="">`:t.err?'×':'…'}</div><span>${lab(t.valid)}<i class="src" style="font-style:normal">${t.kind==='jma'?(t.hrs?t.hrs+'h予想':'実況'):'FEAS'}</i></span></button>`).join('');
@@ -875,7 +876,7 @@ async function loadWeekly(){
       <div class="tbar"><button id="wsPrev">◀</button><span class="tlabel" id="wsInfo" style="flex:1;text-align:center;min-width:0"></span><button id="wsNext">▶</button></div>
     </div>
     <div class="wsGrid" id="wsGrid"></div>
-    <p class="note">水色の時刻は気象庁の天気図（実況・24h・48h予想。前線入り）。それ以外は週間天気図（FEAS）の下段「地上気圧・850hPa気温」の日本付近を切り出し、日本を赤で強調したもの（前線は描かれていません）。気象庁は3日目以降の地上予想天気図を公開していません。</p>
+    <p class="note">前半の水色の時刻は気象庁の天気図（実況・24h・48h予想。前線入り）。後半は週間天気図（FEAS）の下段「地上気圧・850hPa気温」の日本付近を切り出し、日本を赤で強調したもの（前線は描かれていません）。気象庁は3日目以降の地上予想天気図を公開していません。</p>
   </div>
   ${nwpCardHtml(P.weekly)}
   <div class="card"><h3>週間天気予報</h3>${metaEl('wk')}<div id="fcWeek" class="wk loading">読み込み中…</div>
