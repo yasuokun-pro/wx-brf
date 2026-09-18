@@ -99,6 +99,9 @@
   .raw .tk:hover,.raw .tk.on{background:var(--line);color:var(--cyn)}
   .raw .tk.unparsed{color:var(--amb);border-bottom:1px dashed var(--amb)}
   .raw .tk.change{color:var(--mag)}
+  .learn{border-left:3px solid var(--amb);background:rgba(255,176,46,.07);padding:8px 10px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px;line-height:1.7}
+  .learn h4{font-size:13px;font-weight:700;margin:6px 0 2px;color:var(--amb)}
+  .learn table.t td{vertical-align:top}
   .tkja{font-size:12px;color:var(--cyn);min-height:1.6em;margin:4px 2px}
   /* VMC/SVFR/IMC は判定バッジ(塗り)と区別するため枠線だけ */
   .fr{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 7px;border-radius:4px;border:1.5px solid;white-space:nowrap}
@@ -183,7 +186,7 @@ import { judgeMetar, judgeTaf, judgeNwp, worst, LEVEL_JA, FR_RANK } from './lib/
 import { makeProfile, analyze, cloudBaseEspy, M_FT } from './lib/sounding.js';
 import { meteogram, crossSection, skewT } from './lib/charts.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p4-2', BUILD='2026-09-18';
+const VER_TAG='p4-3', BUILD='2026-09-18';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -294,6 +297,28 @@ function laterHtml(s){
     5:'METAR/TAFの原文と日本語デコード、横風成分、ミニマ判定。国際配信されない飛行場のMETARは写真からテキスト認識でコピーして貼り付ける欄を設けます。',
     9:'各画面の話すポイントをつないだ読み上げ用のブリーフィング台本。'})[s.n]}</p></div>`;
 }
+
+/* ───────── 学習モード ─────────
+   ONのとき、用語の1文の説明と「どこを見るか」を各画面に出す。図の該当箇所を強調するボタンも出す */
+const learnOn=()=>!!store.get('wx.learn');
+function learnBox(html){return learnOn()?`<div class="learn">${html}</div>`:''}
+/* 用語：画面のあちこちで使う1文の説明 */
+const TERMS={
+  ssi:'SSI（ショワルター安定指数）＝850hPaの空気を500hPaまで持ち上げたときの、周りとの気温差。0以下で雷の可能性。',
+  li:'LI（リフテッドインデックス）＝地上の空気を500hPaまで持ち上げたときの気温差。SSIより地上の状態が効く。',
+  cape:'CAPE＝持ち上げた空気が浮力で得るエネルギー。大きいほど上昇流が強く、積乱雲が発達しやすい。',
+  lcl:'LCL（持ち上げ凝結高度）＝地上の空気が持ち上げられて雲になる高さ。積雲系の雲底の目安。',
+  moist:'湿潤層＝気温と露点の差が小さい層。そこに雲がある可能性が高い。',
+  inversion:'逆転層＝高さとともに気温が上がる層。空気が上に行けなくなり、下に雲や霧が溜まる。',
+  shear:'鉛直シアー＝高さによる風向風速の差。大きいと低高度で揺れやすい。',
+  freezing:'0℃高度＝気温が0℃になる高さ。湿った空気と重なると着氷に注意。',
+  trough:'トラフ＝上空の気圧の谷。前面（東側）では天気が下り坂になりやすい。',
+  vort:'正渦度＝反時計回りの回転の強さ。正渦度が流れ込む所では上昇流が強まり、天気が悪くなりやすい。',
+  shitsusu:'湿数＝気温と露点の差。小さいほど湿っていて、雲ができやすい。',
+  updraft:'上昇流（鉛直p速度）＝負の値が上昇。上昇域は雲・降水ができやすい。',
+  ept:'相当温位＝空気の暖かさと湿り気をまとめた量。高い空気が流れ込むと大雨になりやすい。',
+};
+const term=k=>learnOn()?`<div class="note">${esc(TERMS[k]||'')}</div>`:'';
 
 /* ───────── 図：タップで全画面ビューア ───────── */
 function figHtml(id,title){return `<div class="fig" id="${id}" data-title="${esc(title)}"><div class="loading">読み込み中…</div></div>`}
@@ -453,6 +478,7 @@ async function loadHome(){
     <div class="note" id="winNote"></div>
     <div class="row"><label>飛行場（ICAO）</label><input id="cfgAd" placeholder="例 RJTT RJTF" value="${esc(cfg.ad||'')}" style="width:14em;text-transform:uppercase"></div>
     <div class="row"><label>府県予報区</label><select id="cfgOffice"><option>読み込み中…</option></select></div>
+    <div class="row"><label>学習モード</label><label class="chk"><input type="checkbox" id="cfgLearn" ${(store.get('wx.learn')?'checked':'')}>用語の説明と「どこを見るか」を各画面に出す</label></div>
     <p class="note">設定はこの端末の中だけに保存します。飛行場は空白区切りで入力し、画面5で判定します。</p>
   </div>
   <div class="card">
@@ -479,6 +505,7 @@ async function loadHome(){
   b.querySelectorAll('[data-go]').forEach(a=>a.onclick=e=>{e.preventDefault();goTo(SCREENS.findIndex(s=>s.n===+a.dataset.go))});
   const save=()=>{store.set('wx.cfg',{...(store.get('wx.cfg')||{}),when:$('#cfgWhen').value,ret:$('#cfgRet').value,ad:$('#cfgAd').value.toUpperCase().replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim(),office:$('#cfgOffice').value});winNote()};
   const winNote=()=>{const w=flightWindow();$('#winNote').textContent=`判定する時間帯：${fJst(w.from)} 〜 ${fJst(w.to)} JST${w.auto?'（出発予定が未入力のため、今から3時間）':''}`};
+  $('#cfgLearn').onchange=e=>{store.set('wx.learn',e.target.checked);for(const n of [1,5,6]) loaded.delete(n);};
   $('#cfgWhen').onchange=()=>{save();loaded.delete(5)};$('#cfgRet').onchange=()=>{save();loaded.delete(5)};$('#cfgAd').onchange=()=>{save();loaded.delete(5)};
   winNote();renderJudges();
   $('#cfgOffice').onchange=()=>{save();loaded.delete(7);loaded.delete(8)};
@@ -559,6 +586,14 @@ async function loadSynoptic(){
     ${metaEl('tanki')}
     <div id="tankiBox"><p class="note">PDF（数ページ）。フェーズ3でAI解説の主な入力にします。</p></div>
   </div>
+  ${learnBox(`<h4>高層天気図の見どころ</h4>
+    <table class="t">
+      <tr><td style="width:7em">500hPa</td><td>トラフ（気圧の谷）の位置と動き。谷の東側は天気が下り坂。${esc(TERMS.trough)}</td></tr>
+      <tr><td>渦度</td><td>${esc(TERMS.vort)}</td></tr>
+      <tr><td>700hPa</td><td>${esc(TERMS.shitsusu)} 湿数が小さい域と${esc(TERMS.updraft)}が重なる所は中層雲・降水。</td></tr>
+      <tr><td>850hPa</td><td>風向風速と気温の分布。暖かい空気が流れ込む所は雲が広がり、冷たい空気が入る所は不安定。${esc(TERMS.ept)}</td></tr>
+      <tr><td>地上</td><td>等圧線の間隔が狭い＝強風。前線の位置と動きから通過時刻を読む。</td></tr>
+    </table>`)}
   <div class="card">
     <h3>AIの総合解析<span class="sp"></span><span class="badge none">未実装</span></h3>
     <p class="note">フェーズ3：高層解析チェックリスト（トラフ・正渦度域・寒気・湿数・前線）に沿って、図の上に見るべき点の印を重ねて解説します。</p>
@@ -1037,6 +1072,14 @@ async function loadAirfields(){
   </div>
   ${ids.length?'':'<div class="card"><p class="note">ホーム画面の「飛行場（ICAO）」に飛行場を入れてください。</p></div>'}
   <div id="adCards"></div>
+  ${learnBox(`<h4>METAR/TAFの見どころ</h4>
+    <table class="t">
+      <tr><td style="width:7em">雲底</td><td>BKN・OVC・VV（鉛直視程）の一番低い層がシーリング。FEW・SCTはシーリングにならないが、1,000ft以下のSCTは低い雲として注意に出す。</td></tr>
+      <tr><td>気温と露点</td><td>差が3℃以下は、夜から朝に霧や低い雲になりやすい。夕方以降に差が縮むかを見る。</td></tr>
+      <tr><td>TAFの変化群</td><td>BECMG＝次第に変わる（その期間中は新旧の両方を見る）。TEMPO＝一時的（1回1時間未満で、合計が期間の半分未満）。PROB30/40＝その確率で起きる。</td></tr>
+      <tr><td>VMC/SVFR/IMC</td><td>VMCは雲高1,000ft以上かつ地上視程5km以上（管制圏内の飛行場で離着陸するとき）。IMCでも地上視程1,500m以上なら、許可があれば特別VFRで飛べる。</td></tr>
+      <tr><td>横風</td><td>風速×sin(風向−滑走路方位)。ガストがあるときはガストで計算する。</td></tr>
+    </table>`)}
   <div class="card">
     <h3>電文を貼り付け</h3>
     <p class="note">国際配信されない飛行場は、iPhoneの写真アプリでMETAR/TAFの文字を長押し（テキスト認識表示）してコピーし、ここに貼ります。読み取りは端末の中だけで行い、どこにも送りません。METAR・SPECI・TAF で始まる行ごとに分けるので、まとめて貼れます。</p>
@@ -1294,11 +1337,33 @@ async function loadVertical(){
     </table>
     <p class="note">下の「この時刻の判定材料」に、SSI・CAPE（雷の可能性）、0℃高度（着氷）、湿潤層、逆転層、風のシアー（乱気流）が数値と色で出ます。緑＝問題なし、黄＝注意です。雲底・雲量は推定です。</p>
   </details>
+  ${learnOn()?`<div class="card"><h3>見どころ：雲が「残る雲」か「発達する雲」か</h3>
+    <p class="note">同じ雲でも、逆転層に押さえられた雲と、対流で発達する雲では、待てば良くなるのか、急に悪くなるのかが変わります。Skew-Tの形で見分けます。</p>
+    <table class="t">
+      <tr><th style="width:8.5em">逆転層の雲</th><th>対流の雲</th></tr>
+      <tr><td>気温の線が高さとともに<b>右へ折れる</b>（＝ふた）。その下に雲がたまり、雲頂は逆転層の下で止まる</td>
+          <td>気温の線が<b>左へ倒れる</b>（急に冷える）。気塊の破線が気温の線より<b>右</b>を通る＝浮力あり</td></tr>
+      <tr><td>層雲・層積雲。雲底は低く、何時間も続く。日射で地面が暖まる、風が強まって混ざると消える（朝に多い）</td>
+          <td>積雲・積乱雲。30分で発達し、しゅう雨・雷・突風。日射で強まり午後に最大、夕方に弱まる</td></tr>
+      <tr><td>アプリでは「逆転層」が黄色、湿潤層が地上付近だけ、SSIは正でCAPEはほぼ0</td>
+          <td>アプリでは SSIが0以下・CAPEが出る。LCLが低いほど雲底も低い</td></tr>
+    </table>
+    <p class="note">下に逆転層（ふた）があってCAPEも大きいときは、ふたが取れるまで何も起きず、取れた瞬間に一気に発達します（夏の夕立の形）。</p>
+    <div class="row"><span class="note">Skew-Tで強調：</span>
+      <button data-hl="inversion">逆転層</button><button data-hl="moist">湿潤層（雲）</button><button data-hl="parcel">気塊の浮力</button><button data-hl="">強調なし</button></div>
+    <p class="note">見る順番：①気温の線の形（ふたか不安定か）→②気温と露点が近い高度（＝雲）→③下の判定材料の色→④断面図でその層が飛行時間帯にどう動くか。</p>
+  </div>`:''}
   <div class="card" id="vBox"><div class="loading">読み込み中…</div></div>
   <div class="card" id="vIdx"></div>
   <div class="card"><h3>公式の資料と並べて見る</h3><div id="vOfficial" class="note">気象庁の飛行場時系列予報は画面5にもあります。</div>
     <p class="note">この画面の図は数値予報からの自動作成です。気象庁が発表する飛行場予報等と異なる場合があります。雲底・雲量は推定です。出典：Open-Meteo（気象庁モデル）</p></div>`;
   $('#vAdRow').onclick=e=>{const x=e.target.closest('[data-ad]');if(!x)return;store.set('wx.vertAd',x.dataset.ad);loaded.delete(6);activate(curIdx)};
+  b.querySelectorAll('[data-hl]').forEach(x=>x.onclick=()=>{
+    store.set('wx.hl',x.dataset.hl||null);store.set('wx.vertTab','skew');
+    $('#vTabs').querySelectorAll('button').forEach(y=>y.classList.toggle('on',y.dataset.t==='skew'));
+    b.querySelectorAll('[data-hl]').forEach(y=>y.classList.toggle('on',y===x&&!!x.dataset.hl));
+    drawVertical();
+  });
   $('#vTabs').onclick=e=>{const x=e.target.closest('button');if(!x)return;$('#vTabs').querySelectorAll('button').forEach(y=>y.classList.toggle('on',y===x));store.set('wx.vertTab',x.dataset.t);drawVertical()};
   if(!cur){$('#vBox').innerHTML='<p class="note">飛行場を選ぶと、数値予報から断面図などを作ります。</p>';return}
   const pos=await nwpPos(cur);
@@ -1355,7 +1420,8 @@ function drawVertical(){
     box.innerHTML=`<h3>Skew-T（${esc(VERT.icao)}）</h3><div id="skBar"></div><canvas id="cvSkew"></canvas>
       <p class="note">橙＝気温、水色＝露点、桃色の破線＝地上の気塊を持ち上げた経路とLCL。細い線は乾燥断熱線（橙）・湿潤断熱線（緑破線）・等飽和混合比線（水色点線）。右端は各層の風。</p>`;
     const items=d.times.map((t,k)=>({label:`${fBoth(t)}`,k}));
-    timeBar($('#skBar'),items,it=>{VERT.hour=it.k;const p=d.prof[it.k];skewT($('#cvSkew'),p,{parcel:p[0],elevM:d.elevM});renderIdx(an[it.k],it.k)},{startIdx:i});
+    timeBar($('#skBar'),items,it=>{VERT.hour=it.k;const p=d.prof[it.k];
+      skewT($('#cvSkew'),p,{parcel:p[0],elevM:d.elevM,highlight:store.get('wx.hl')||null});renderIdx(an[it.k],it.k)},{startIdx:i});
     return;
   }
   renderIdx(an[nearestIdx(d.times,new Date())],nearestIdx(d.times,new Date()));
@@ -1374,7 +1440,7 @@ function renderIdx(a,i){
   const el=$('#vIdx');if(!el)return;
   if(!a){el.innerHTML='';return}
   const d=VERT.data,mn=store.get('wx.minima')||{},topFt=+((mn.flightTopFt)||10000);
-  const row=(label,value,level,why)=>`<tr><td style="width:8.5em"><span class="lvl ${level}"></span>${label}</td><td class="m">${value}${why?`<div class="why">${esc(why)}</div>`:''}</td></tr>`;
+  const row=(label,value,level,why,tk)=>`<tr><td style="width:8.5em"><span class="lvl ${level}"></span>${label}</td><td class="m">${value}${why?`<div class="why">${esc(why)}</div>`:''}${tk?term(tk):''}</td></tr>`;
   const ssiLv=a.ssi==null?'none':a.ssi<=0?'caution':'go';
   const capeLv=a.cape==null?'none':a.cape>=1000?'caution':'go';
   const shearLv=a.shear0to5000==null?'none':a.shear0to5000>=25?'caution':'go';
@@ -1383,15 +1449,15 @@ function renderIdx(a,i){
   const ceilLv=a.cloudBaseFt==null?'none':(mn.ceilFt&&a.cloudBaseFt<+mn.ceilFt?'caution':'go');
   el.innerHTML=`<h3>この時刻の判定材料<span class="sp"></span><span class="note">${fBoth(d.times[i])}</span></h3>
   <table class="t">
-    ${row('SSI',a.ssi==null?'—':a.ssi,ssiLv,a.ssi!=null&&a.ssi<=0?'0以下：雷の可能性':'850hPaの気塊を500hPaへ持ち上げた差')}
-    ${row('LI',a.li==null?'—':a.li,a.li!=null&&a.li<=0?'caution':'go','地上の気塊を500hPaへ持ち上げた差')}
-    ${row('CAPE',a.cape==null?'—':`${a.cape} J/kg`,capeLv,a.cape>=1000?'1000以上：発達した対流の可能性':'')}
-    ${row('LCL（雲底の目安）',a.lclFt==null?'—':`${a.lclFt}ft`,ceilLv,'地上の気塊が凝結する高さ（推定）')}
+    ${row('SSI',a.ssi==null?'—':a.ssi,ssiLv,a.ssi!=null&&a.ssi<=0?'0以下：雷の可能性':'850hPaの気塊を500hPaへ持ち上げた差','ssi')}
+    ${row('LI',a.li==null?'—':a.li,a.li!=null&&a.li<=0?'caution':'go','地上の気塊を500hPaへ持ち上げた差','li')}
+    ${row('CAPE',a.cape==null?'—':`${a.cape} J/kg`,capeLv,a.cape>=1000?'1000以上：発達した対流の可能性':'','cape')}
+    ${row('LCL（雲底の目安）',a.lclFt==null?'—':`${a.lclFt}ft`,ceilLv,'地上の気塊が凝結する高さ（推定）','lcl')}
     ${row('推定雲底(Espy)',a.cloudBaseFt==null?'—':`${a.cloudBaseFt}ft`,ceilLv,'地上の気温と露点の差から')}
-    ${row('0℃高度',a.freezingFt==null?'—':`${a.freezingFt}ft`,fzLv,a.freezingInFlight?(a.moistInFlight?'飛行高度帯にあり、湿潤層と重なる：着氷に注意':'飛行高度帯にある'):`飛行高度帯（地上〜${topFt}ft）の外`)}
-    ${row('湿潤層',a.moist.length?a.moist.map(m=>`${m.fromFt}〜${m.toFt}ft`).join('、'):'なし',a.moistInFlight?'caution':'go','気温と露点の差が3℃以下の層（雲がある可能性）')}
-    ${row('逆転層',a.inversions.length?a.inversions.map(x=>`${Math.round((x.fromZ-d.elevM)*M_FT)}〜${Math.round((x.toZ-d.elevM)*M_FT)}ft(+${x.dT}℃)`).join('、'):'なし',invLv,invLv==='caution'?'地上付近の逆転層＋湿潤：霧・低い雲が残りやすい':'')}
-    ${row('風のシアー',a.shear0to5000==null?'—':`${a.shear0to5000}kt`,shearLv,'地上〜5,000ftの風ベクトルの差。25kt以上で乱気流に注意')}
+    ${row('0℃高度',a.freezingFt==null?'—':`${a.freezingFt}ft`,fzLv,a.freezingInFlight?(a.moistInFlight?'飛行高度帯にあり、湿潤層と重なる：着氷に注意':'飛行高度帯にある'):`飛行高度帯（地上〜${topFt}ft）の外`,'freezing')}
+    ${row('湿潤層',a.moist.length?a.moist.map(m=>`${m.fromFt}〜${m.toFt}ft`).join('、'):'なし',a.moistInFlight?'caution':'go','気温と露点の差が3℃以下の層（雲がある可能性）','moist')}
+    ${row('逆転層',a.inversions.length?a.inversions.map(x=>`${Math.round((x.fromZ-d.elevM)*M_FT)}〜${Math.round((x.toZ-d.elevM)*M_FT)}ft(+${x.dT}℃)`).join('、'):'なし',invLv,invLv==='caution'?'地上付近の逆転層＋湿潤：霧・低い雲が残りやすい':'','inversion')}
+    ${row('風のシアー',a.shear0to5000==null?'—':`${a.shear0to5000}kt`,shearLv,'地上〜5,000ftの風ベクトルの差。25kt以上で乱気流に注意','shear')}
   </table>
   <p class="note">しきい値は目安です。指数の計算は単体テストで教科書の値と照合しています（tests/sounding.test.mjs）。</p>`;
 }
