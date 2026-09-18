@@ -181,12 +181,13 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script type="module">
-import { parseMetar, parseTaf } from './lib/metar.js';
+import { parseMetar, parseTaf, ceiling } from './lib/metar.js';
 import { judgeMetar, judgeTaf, judgeNwp, worst, LEVEL_JA, FR_RANK } from './lib/judge.js';
 import { makeProfile, analyze, cloudBaseEspy, M_FT } from './lib/sounding.js';
 import { meteogram, crossSection, skewT } from './lib/charts.js';
+import { addObs, addSnapshot, pairs as vPairs, stats as vStats, correction as vCorrection, applyCorrection, LEAD_BUCKETS, VARS as V_VARS } from './lib/verify.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p4-3', BUILD='2026-09-18';
+const VER_TAG='p4-4', BUILD='2026-09-18';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -1213,6 +1214,7 @@ function renderAdCards(){
   for(const icao of ids){
     const card=document.getElementById('ad_'+icao),opt=adOpt(icao),rw=runwaysOf(icao);
     const {metar,taf}=pickSources(icao);
+    if(metar) recordObs(icao,metar);
     const jm=metar?judgeMetar(metar.p,mn,{runways:rw,now}):null;
     const jt=taf?judgeTaf(taf.p,mn,{runways:rw,from:w.from,to:w.to}):null;
     const lv=worst([metarCounts?(jm?.level||'none'):'na',jt?.level||'none']);
@@ -1251,6 +1253,38 @@ function renderAdCards(){
   const total=ids.length?worst(levels):'none';
   const t=$('#adTotal');if(t)t.innerHTML=badge(total);
   setJudge(5,total);
+}
+
+/* ───────── 予報の答え合わせ ─────────
+   数値予報を取ったときに「予報の記録」を、METARが来たときに「実測の記録」を端末内に残し、
+   同じ時刻どうしで突き合わせて、この飛行場での外れ方(くせ)を出す。外には送らない */
+function obsFromMetar(p){
+  if(!p?.time) return null;
+  const c=ceiling(p),w=p.wind&&!p.wind.missing?p.wind:null;
+  return {t:p.time.toISOString(),baseFt:c.ft??null,temp:p.temp??null,dew:p.dew??null,
+    wdir:w?w.dir:null,wspd:w?Math.max(w.spd||0,w.gust||0):null,visM:p.vis&&!p.vis.missing?p.vis.m:null};
+}
+function recordObs(icao,metar){
+  if(!metar?.p) return;
+  const all=store.get('wx.obs')||{};
+  let log=all[icao]||[];
+  /* 最新のMETARと、中継が返す過去3時間ぶんも記録する */
+  const list=[metar.p,...(metar.hist||[]).map(h=>{try{return parseMetar(h.raw,{ref:new Date(metar.at)})}catch(e){return null}}).filter(Boolean)];
+  for(const p of list){const r=obsFromMetar(p);if(r)log=addObs(log,r)}
+  all[icao]=log;store.set('wx.obs',all);
+}
+function recordSnapshot(icao,d,est){
+  const rows=d.times.map((t,i)=>({t:t.toISOString(),baseFt:est.baseFt[i],temp:d.sfc.t[i],dew:d.sfc.td[i],
+    wdir:d.sfc.windDir[i],wspd:d.sfc.windSpd[i]==null?null:Math.round(d.sfc.windSpd[i])})).slice(0,48);
+  const all=store.get('wx.fcs')||{};
+  all[icao]=addSnapshot(all[icao]||[],{made:new Date().toISOString(),rows});
+  store.set('wx.fcs',all);
+}
+const verifyPairs=icao=>vPairs((store.get('wx.obs')||{})[icao]||[],(store.get('wx.fcs')||{})[icao]||[]);
+/* 雲底の補正値(件数が足りていれば中央値のずれ) */
+function ceilCorrection(icao){
+  if(!store.get('wx.corr')) return null;
+  return vCorrection(vStats(verifyPairs(icao)),'baseFt');
 }
 
 /* ═════════ 6 飛行場の鉛直構造 ═════════ */
@@ -1355,6 +1389,7 @@ async function loadVertical(){
   </div>`:''}
   <div class="card" id="vBox"><div class="loading">読み込み中…</div></div>
   <div class="card" id="vIdx"></div>
+  <div class="card" id="vVerify"></div>
   <div class="card"><h3>公式の資料と並べて見る</h3><div id="vOfficial" class="note">気象庁の飛行場時系列予報は画面5にもあります。</div>
     <p class="note">この画面の図は数値予報からの自動作成です。気象庁が発表する飛行場予報等と異なる場合があります。雲底・雲量は推定です。出典：Open-Meteo（気象庁モデル）</p></div>`;
   $('#vAdRow').onclick=e=>{const x=e.target.closest('[data-ad]');if(!x)return;store.set('wx.vertAd',x.dataset.ad);loaded.delete(6);activate(curIdx)};
@@ -1397,6 +1432,7 @@ function drawVertical(){
   const topFt=+((mn.flightTopFt)||10000);
   /* 時刻ごとの推定値と判定 */
   const est={baseFt:[],ssi:[],cape:[]},judge=[];
+  VERT.est=est;
   const an=d.times.map((t,i)=>{
     const prof=d.prof[i];
     const a=analyze(prof,{flightFt:[0,topFt],elevM:d.elevM});
@@ -1406,9 +1442,15 @@ function drawVertical(){
     judge.push(judgeNwp(cond,mn,{runways:rw}).level);
     return a;
   });
+  /* 予報の記録（オフラインの前回分は記録しない） */
+  if(!d.offline) recordSnapshot(VERT.icao,d,est);
+  /* 答え合わせでくせが分かっていれば、推定雲底に補正をかける */
+  const corr=ceilCorrection(VERT.icao);
+  if(corr!=null) est.baseFt=est.baseFt.map(v=>applyCorrection(v,corr));
+  renderVerify();
   if(tab==='meteo'){
     box.innerHTML=`<h3>メテオグラム（${esc(VERT.icao)}）<span class="sp"></span><span class="note">水色の帯＝飛行予定の時間帯</span></h3><canvas id="cvMeteo"></canvas>
-      <p class="note">気温・露点、地上風（矢羽）、雲量（上から上層・中層・下層）と<span style="color:var(--mag)">推定雲底</span>、降水量、海面気圧、安定度（線＝SSI、棒＝CAPE）。雲底は数値予報からの推定です。</p>`;
+      <p class="note">気温・露点、地上風（矢羽）、雲量（上から上層・中層・下層）と<span style="color:var(--mag)">推定雲底</span>、降水量、海面気圧、安定度（線＝SSI、棒＝CAPE）。雲底は数値予報からの推定です${corr!=null?`。<b>答え合わせの結果で ${corr>0?corr+'ft 下げて':Math.abs(corr)+'ft 上げて'}補正しています</b>`:''}。</p>`;
     const metarNow=metarPoint(d);
     meteogram($('#cvMeteo'),{times:d.times,sfc:d.sfc,est},{window:w,metar:metarNow});
   }else if(tab==='xs'){
@@ -1435,6 +1477,36 @@ function metarPoint(d){
   if(Math.abs(d.times[i]-metar.p.time)>3600e3) return null;
   return {i,t:metar.p.temp,td:metar.p.dew};
 }
+/* 答え合わせ：予報と実測のずれの一覧 */
+function renderVerify(){
+  const el=$('#vVerify');if(!el)return;
+  const icao=VERT.icao,ps=verifyPairs(icao),st=vStats(ps);
+  const corr=vCorrection(st,'baseFt');
+  const cell=x=>x.n?`${x.bias>0?'+':''}${x.bias}<div class="why">誤差 ${x.mae} ／ ${x.n}件</div>`:'<span class="note">—</span>';
+  el.innerHTML=`
+    <h3>予報の答え合わせ（${esc(icao)}）<span class="sp"></span><button id="vFcSave">今の予報を記録</button><button id="vClr">記録を消す</button></h3>
+    <p class="note">数値予報の値と、あとから来たMETARの実測を同じ時刻で突き合わせ、<b>ずれ（予報−実測）</b>を集計します。プラスなら予報が大きめ（雲底なら高めに出る）。記録は端末の中だけに置き、外には送りません。</p>
+    ${ps.length?`<div class="tl"><table class="t"><tr><th>要素</th>${LEAD_BUCKETS.map(b=>`<th>${b.label}</th>`).join('')}<th>全体</th></tr>
+      ${V_VARS.map(v=>`<tr><td>${v.label}<div class="why">${v.unit}</div></td>${LEAD_BUCKETS.map(b=>`<td class="m">${cell(st[v.key][b.key])}</td>`).join('')}<td class="m">${cell(st[v.key].all)}</td></tr>`).join('')}
+      </table></div>
+      <div class="row"><label class="chk"><input type="checkbox" id="vCorr" ${store.get('wx.corr')?'checked':''} ${corr==null?'disabled':''}>推定雲底に補正をかける${corr==null?`（あと${Math.max(0,10-(st.baseFt.all.n||0))}件で使えます）`:`（雲底のずれの中央値 ${corr>0?'+':''}${corr}ft）`}</label></div>
+      <details><summary>直近の比較（${ps.length}件）</summary><div class="tl"><table class="t"><tr><th>対象時刻</th><th>リード</th><th>雲底 予報/実測</th><th>気温</th><th>風速</th></tr>
+        ${ps.slice(-10).reverse().map(p=>`<tr><td class="m">${fJst(new Date(p.t))}</td><td class="m">${p.leadH}h</td>
+          <td class="m">${p.fc.baseFt??'—'} / ${p.ob.baseFt??'雲なし'}</td>
+          <td class="m">${p.fc.temp??'—'} / ${p.ob.temp??'—'}</td>
+          <td class="m">${p.fc.wspd??'—'} / ${p.ob.wspd??'—'}</td></tr>`).join('')}
+      </table></div></details>`
+    :'<p class="note">まだ突き合わせできる記録がありません。画面6を開くと予報が、画面5でMETARを取ると実測が記録されます。数日ぶんたまると、この飛行場での外れ方（例：予報より雲底が低く出る）が見えてきます。</p>'}`;
+  const cb=$('#vCorr');
+  if(cb) cb.onchange=e=>{store.set('wx.corr',e.target.checked);drawVertical()};
+  $('#vFcSave').onclick=()=>{if(VERT.data){recordSnapshot(icao,VERT.data,VERT.est||{baseFt:[]});renderVerify()}};
+  $('#vClr').onclick=()=>{
+    if(!confirm(`${icao} の予報・実測の記録を消します。よろしいですか`))return;
+    for(const k of ['wx.obs','wx.fcs']){const all=store.get(k)||{};delete all[icao];store.set(k,all)}
+    store.set('wx.corr',false);drawVertical();
+  };
+}
+
 /* 安定度などの数値と注意表示 */
 function renderIdx(a,i){
   const el=$('#vIdx');if(!el)return;
