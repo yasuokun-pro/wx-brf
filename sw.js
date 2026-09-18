@@ -3,7 +3,7 @@
    - 気象データ(一覧JSON・図・PDF)は「ネット優先、失敗したら前回分」。前回分には x-wx-offline: 1 を付けて返す
    - 地図タイル(時刻入りURLなので中身が変わらない)はキャッシュ優先
    ※ index.html 等を更新したら VER を上げる(index.html の VER_TAG・BUILD も一緒に) */
-const VER = 'wxbrf-p2-6';
+const VER = 'wxbrf-p4-1';
 const DATA_CACHE = 'wxbrf-data';
 const TILE_CACHE = 'wxbrf-tiles';
 const TILE_MAX = 3000;
@@ -17,6 +17,8 @@ const SHELL = [
   './japan.json',
   './lib/metar.js',
   './lib/judge.js',
+  './lib/sounding.js',
+  './lib/charts.js',
   './icon-192.png',
   './icon-512.png',
   './icon-180.png',
@@ -44,7 +46,7 @@ function isTile(url) {
   return url.host === 'www.jma.go.jp' && /\/\d+\/\d+\/\d+\.(png|jpg|pbf)$/.test(url.pathname);
 }
 function isData(url) {
-  return url.host === 'www.jma.go.jp' || url.host === 'www.data.jma.go.jp';
+  return url.host === 'www.jma.go.jp' || url.host === 'www.data.jma.go.jp' || url.host === 'api.open-meteo.com';
 }
 
 async function trimTiles() {

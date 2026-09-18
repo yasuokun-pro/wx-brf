@@ -115,6 +115,7 @@
   .grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px 10px}
   .grid2 label{font-size:12px;color:var(--dim);display:flex;flex-direction:column;gap:3px}
   .grid2 input{width:100%}
+  canvas{width:100%;display:block;border-radius:6px}
   textarea{font-family:var(--mono);color:var(--txt);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px;width:100%;min-height:84px}
   details>summary{cursor:pointer;font-size:13px;color:var(--blu);margin:6px 0}
   /* 週間の地上予想図：大きい図＋時刻順のサムネイル一覧 */
@@ -178,9 +179,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script type="module">
 import { parseMetar, parseTaf } from './lib/metar.js';
-import { judgeMetar, judgeTaf, worst, LEVEL_JA, FR_RANK } from './lib/judge.js';
+import { judgeMetar, judgeTaf, judgeNwp, worst, LEVEL_JA, FR_RANK } from './lib/judge.js';
+import { makeProfile, analyze, cloudBaseEspy, M_FT } from './lib/sounding.js';
+import { meteogram, crossSection, skewT } from './lib/charts.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p2-6', BUILD='2026-09-17';
+const VER_TAG='p4-1', BUILD='2026-09-18';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -248,7 +251,7 @@ const SCREENS=[
   {n:3,name:'レーダー予想'},
   {n:4,name:'経路',later:'フェーズ4'},
   {n:5,name:'飛行場'},
-  {n:6,name:'鉛直構造',later:'フェーズ4'},
+  {n:6,name:'鉛直構造'},
   {n:7,name:'明日の予想'},
   {n:8,name:'週間'},
   {n:9,name:'まとめ',later:'フェーズ3'},
@@ -289,7 +292,6 @@ function laterHtml(s){
   <p class="note">この画面は${s.later}で作ります。${({
     4:'下層悪天予想図（詳細版）、経路上の自動判定表、予報官の経路予報の写真添付欄。',
     5:'METAR/TAFの原文と日本語デコード、横風成分、ミニマ判定。国際配信されない飛行場のMETARは写真からテキスト認識でコピーして貼り付ける欄を設けます。',
-    6:'メテオグラム、自作の予報断面図、Skew-Tと安定度指数、公式の飛行場時系列予報。',
     9:'各画面の話すポイントをつないだ読み上げ用のブリーフィング台本。'})[s.n]}</p></div>`;
 }
 
@@ -436,7 +438,7 @@ const JUDGE_ROWS=[
   {n:3,name:'レーダー予想',note:'飛行時間帯の降水予想（フェーズ4）'},
   {n:4,name:'経路',note:'区間ごと（フェーズ4）'},
   {n:5,name:'飛行場',note:'METAR/TAFとミニマ（飛行場ごとの最も悪い判定）'},
-  {n:6,name:'鉛直構造',note:'時間帯・安定度（フェーズ4）'},
+  {n:6,name:'鉛直構造',note:'数値予報からの推定（判定は断面図の色帯）',none:1},
   {n:7,name:'明日の予想',note:'判定なし（解説のみ）',none:1},
   {n:8,name:'週間',note:'判定なし',none:1},
 ];
@@ -483,7 +485,8 @@ async function loadHome(){
   $('#btnReload').onclick=()=>{
     const keep=SCREENS[curIdx].n;
     for(const n of [...loaded]) if(n!==0) loaded.delete(n);
-    for(const n of [1,2,3,5,7,8]) $(`#scr${n} .body`).innerHTML='';
+    for(const n of [1,2,3,5,6,7,8]) $(`#scr${n} .body`).innerHTML='';
+    NWP_CACHE.clear();
     MAPS.forEach(m=>m.remove());MAPS.length=0;SRC.clear();PDF_CACHE.clear();renderHomeStatus();
     if(keep!==0){loaded.delete(keep);activate(curIdx)}
   };
@@ -989,7 +992,7 @@ const NOGO_WX_DEFAULT=['TS','CB','FG','FZ','+RA','SN','GR','SQ','FC','VA'];
 const MINIMA_FIELDS=[
   ['ceilFt','雲底 ミニマ(ft)'],['ceilMarginFt','雲底 余裕幅(ft)'],['visM','視程 ミニマ(m)'],['visMarginM','視程 余裕幅(m)'],
   ['windKt','風速 上限(kt)'],['windMarginKt','風速 余裕幅(kt)'],['xwindKt','横風 上限(kt)'],['xwindMarginKt','横風 余裕幅(kt)'],
-  ['vmcCeilFt','VMC 雲高の基準(ft)'],['vmcVisM','VMC 地上視程の基準(m)'],['svfrVisM','SVFR 地上視程の基準(m)'],
+  ['flightTopFt','飛行高度帯の上限(ft)'],['vmcCeilFt','VMC 雲高の基準(ft)'],['vmcVisM','VMC 地上視程の基準(m)'],['svfrVisM','SVFR 地上視程の基準(m)'],
   ['beforeMin','出発前の余裕(分)'],['afterMin','帰投後の余裕(分)'],['spreadC','気温−露点 注意(℃)'],['sctCautionFt','この高さ以下のSCTは注意(ft)'],['metarMaxAgeMin','METARの古さ上限(分)'],
 ];
 const WXDATA={relay:null,relayErr:''};
@@ -1042,7 +1045,7 @@ async function loadAirfields(){
   </div>
   <details class="card"><summary>ミニマと判定の設定</summary>
     <p class="note">値はこの端末の中だけに保存します。空欄の項目は判定できず灰色になります。</p>
-    <div class="grid2">${MINIMA_FIELDS.map(([k,l])=>`<label>${l}<input inputmode="decimal" data-mn="${k}" value="${esc(mn[k]??'')}" placeholder="${{spreadC:'3',sctCautionFt:'1000',metarMaxAgeMin:'90',beforeMin:'0',afterMin:'0',vmcCeilFt:'1000',vmcVisM:'5000',svfrVisM:'1500'}[k]||''}"></label>`).join('')}</div>
+    <div class="grid2">${MINIMA_FIELDS.map(([k,l])=>`<label>${l}<input inputmode="decimal" data-mn="${k}" value="${esc(mn[k]??'')}" placeholder="${{spreadC:'3',sctCautionFt:'1000',metarMaxAgeMin:'90',beforeMin:'0',afterMin:'0',vmcCeilFt:'1000',vmcVisM:'5000',svfrVisM:'1500',flightTopFt:'10000'}[k]||''}"></label>`).join('')}</div>
     <p class="note" style="margin-top:6px"><b>VMC</b>：航空法施行規則第5条第4号（管制圏・情報圏内の空港等で離着陸）の基準、雲高300m≒1,000ft以上かつ地上視程5km以上。告示で指定された空港は8km・450mなので変えてください。<b style="color:#ff8a3d">SVFR</b>：IMCのうち地上視程1,500m以上（管制業務処理規程で、管制圏・情報圏のある飛行場の地上視程が1,500m以上なら管制機関は特別VFRを許可できる。雲高の条件は無い。許可が要る）。<b style="color:var(--red)">IMC</b>：地上視程1,500m未満。雲からの距離など、地上の観測では決まらない条件は見ていません。</p>
     <p class="note" style="margin-top:8px">NO-GOにする天気現象（それ以外の降水・しゅう雨・周辺の現象・TCUは注意）</p>
     <div class="row">${NOGO_WX.map(([k,l])=>`<label class="chk"><input type="checkbox" data-wx="${k}" ${(mn.nogoWx||NOGO_WX_DEFAULT).includes(k)?'checked':''}>${l}</label>`).join('')}</div>
@@ -1207,7 +1210,169 @@ function renderAdCards(){
   setJudge(5,total);
 }
 
-const LOADERS={0:loadHome,1:loadSynoptic,2:loadRadarNow,3:loadRadarFcst,5:loadAirfields,7:loadTomorrow,8:loadWeekly};
+/* ═════════ 6 飛行場の鉛直構造 ═════════ */
+/* 数値予報(Open-Meteo の気象庁モデル)の気圧面データから、メテオグラム・予報断面図・Skew-T を自作する。
+   ⚠ 気象庁が発表する飛行場予報とは別物（数値予報からの自動作成）。公式の飛行場時系列予報も並べて出す。
+   ⚠ 雲底・雲量は数値予報からの「推定」。図にも「推定」と書く */
+const NWP_LEVELS=[1000,975,950,925,900,850,800,700,600,500];
+const NWP_CACHE=new Map();
+function nwpUrl(lat,lon){
+  const N=SRCDEF.nwp;
+  const vars=[...N.surface];
+  for(const p of NWP_LEVELS) for(const v of N.levelVars) vars.push(`${v}_${p}hPa`);
+  return `${N.url}?latitude=${lat}&longitude=${lon}&hourly=${vars.join(',')}&forecast_days=${N.days}&wind_speed_unit=kn&timezone=UTC`;
+}
+/* 取得して、時刻ごとの鉛直プロファイルに組み直す */
+async function fetchNwp2(lat,lon){
+  const key=`${(+lat).toFixed(3)},${(+lon).toFixed(3)}`;
+  if(NWP_CACHE.has(key)) return NWP_CACHE.get(key);
+  const r=await getJSON(nwpUrl(lat,lon));
+  const h=r.data.hourly,times=h.time.map(t=>new Date(t+'Z'));
+  const elevM=r.data.elevation??0;
+  const sfc={
+    t:h.temperature_2m,td:h.dew_point_2m,windDir:h.wind_direction_10m,windSpd:h.wind_speed_10m,
+    precip:h.precipitation,mslp:h.pressure_msl,sp:h.surface_pressure,
+    cloudLow:h.cloud_cover_low,cloudMid:h.cloud_cover_mid,cloudHigh:h.cloud_cover_high,
+  };
+  const prof=times.map((t,i)=>{
+    const rows=[{p:sfc.sp[i],t:sfc.t[i],td:sfc.td[i],rh:null,z:elevM,dir:sfc.windDir[i],spd:sfc.windSpd[i],sfc:true}];
+    for(const p of NWP_LEVELS){
+      const T=h[`temperature_${p}hPa`]?.[i],RH=h[`relative_humidity_${p}hPa`]?.[i],Z=h[`geopotential_height_${p}hPa`]?.[i];
+      if(T==null||Z==null) continue;
+      if(p>=sfc.sp[i]) continue; /* 地面より下の気圧面は使わない */
+      rows.push({p,t:T,rh:RH,z:Z,dir:h[`wind_direction_${p}hPa`]?.[i],spd:h[`wind_speed_${p}hPa`]?.[i],cc:h[`cloud_cover_${p}hPa`]?.[i]});
+    }
+    return makeProfile(rows);
+  });
+  const out={times,elevM,sfc,prof,got:r.got,offline:r.offline,lat,lon};
+  NWP_CACHE.set(key,out);
+  return out;
+}
+/* 推定雲底(ft AGL)：下から見て相対湿度が90%以上になる最初の高さ。無ければ地上の気温と露点の差から(Espy) */
+function estBaseFt(prof,elevM,tC,tdC){
+  for(let ft=200;ft<=10000;ft+=100){
+    const zM=ft/M_FT+elevM;
+    const xs=prof.filter(l=>l.z!=null&&l.rh!=null);
+    if(xs.length<2) break;
+    let rh=null;
+    for(let i=1;i<xs.length;i++) if(zM<=xs[i].z){const a=xs[i-1],b=xs[i],f=(zM-a.z)/((b.z-a.z)||1);rh=a.rh+f*(b.rh-a.rh);break}
+    if(rh!=null&&rh>=90) return ft;
+  }
+  return cloudBaseEspy(tC,tdC);
+}
+const nwpPos=icao=>{const o=adOpt(icao);return (o.lat!=null&&o.lon!=null&&o.lat!==''&&o.lon!=='')?{lat:+o.lat,lon:+o.lon}:null};
+
+async function loadVertical(){
+  const b=$('#scr6 .body'),ids=adList();
+  const cur=store.get('wx.vertAd')||ids[0]||'';
+  b.innerHTML=`
+  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  <div class="card">
+    <h3>飛行場<span class="sp"></span><span id="vTabs" class="seg"><button data-t="meteo" class="on">メテオグラム</button><button data-t="xs">断面図</button><button data-t="skew">Skew-T</button></span></h3>
+    <div class="row" id="vAdRow">${ids.length?ids.map(i=>`<button data-ad="${i}" class="${i===cur?'on':''}">${i}</button>`).join(''):'<span class="note">ホーム画面で飛行場を入れてください</span>'}</div>
+    <div class="row" id="vPos"></div>
+    <div id="vMeta" class="meta"></div>
+  </div>
+  <div class="card" id="vBox"><div class="loading">読み込み中…</div></div>
+  <div class="card" id="vIdx"></div>
+  <div class="card"><h3>公式の資料と並べて見る</h3><div id="vOfficial" class="note">気象庁の飛行場時系列予報は画面5にもあります。</div>
+    <p class="note">この画面の図は数値予報からの自動作成です。気象庁が発表する飛行場予報等と異なる場合があります。雲底・雲量は推定です。出典：Open-Meteo（気象庁モデル）</p></div>`;
+  $('#vAdRow').onclick=e=>{const x=e.target.closest('[data-ad]');if(!x)return;store.set('wx.vertAd',x.dataset.ad);loaded.delete(6);activate(curIdx)};
+  $('#vTabs').onclick=e=>{const x=e.target.closest('button');if(!x)return;$('#vTabs').querySelectorAll('button').forEach(y=>y.classList.toggle('on',y===x));store.set('wx.vertTab',x.dataset.t);drawVertical()};
+  if(!cur){$('#vBox').innerHTML='<p class="note">飛行場を選ぶと、数値予報から断面図などを作ります。</p>';return}
+  const pos=nwpPos(cur);
+  $('#vPos').innerHTML=`<label class="chk" style="min-width:0">緯度<input data-lat value="${esc(adOpt(cur).lat??'')}" placeholder="35.553" style="width:6.5em"></label>
+    <label class="chk" style="min-width:0">経度<input data-lon value="${esc(adOpt(cur).lon??'')}" placeholder="139.781" style="width:6.5em"></label>
+    <button id="vPosSave">保存</button><span class="note">${esc(cur)}の位置（端末内だけに保存。地図アプリの座標を貼れます）</span>`;
+  $('#vPosSave').onclick=()=>{
+    const lat=parseFloat($('#vPos [data-lat]').value),lon=parseFloat($('#vPos [data-lon]').value);
+    if(!Number.isFinite(lat)||!Number.isFinite(lon)){alert('緯度・経度を数字で入れてください');return}
+    setAdOpt(cur,{lat,lon});loaded.delete(6);activate(curIdx);
+  };
+  if(!pos){$('#vBox').innerHTML='<p class="note">この飛行場の緯度・経度を入れてください。数値予報はこの位置で取ります。</p>';$('#vIdx').innerHTML='';return}
+  setStatus('nwp',{label:'数値予報（気象庁モデル）',pubLabel:'取得',staleMin:180});
+  try{
+    VERT.data=await fetchNwp2(pos.lat,pos.lon);
+    VERT.icao=cur;
+    setStatus('nwp',{pub:VERT.data.got,got:VERT.data.got,offline:VERT.data.offline});
+    $('#vMeta').innerHTML=`${esc(cur)} ${VERT.data.lat}N ${VERT.data.lon}E ・標高 ${Math.round(VERT.data.elevM*M_FT)}ft（${Math.round(VERT.data.elevM)}m）<br>取得 ${fJst(VERT.data.got)}${VERT.data.offline?'（オフライン：前回取得分）':''} ・出典 Open-Meteo（気象庁モデル・非商用）`;
+    drawVertical();
+  }catch(e){$('#vBox').innerHTML=errBox(e.message,SRCDEF.nwp.page);setStatus('nwp',{err:e.message})}
+}
+const VERT={data:null,icao:'',hour:0};
+
+function drawVertical(){
+  const d=VERT.data;if(!d)return;
+  const tab=store.get('wx.vertTab')||'meteo';
+  const box=$('#vBox'),mn=store.get('wx.minima')||{},w=flightWindow(),rw=runwaysOf(VERT.icao);
+  const topFt=+((mn.flightTopFt)||10000);
+  /* 時刻ごとの推定値と判定 */
+  const est={baseFt:[],ssi:[],cape:[]},judge=[];
+  const an=d.times.map((t,i)=>{
+    const prof=d.prof[i];
+    const a=analyze(prof,{flightFt:[0,topFt],elevM:d.elevM});
+    const base=estBaseFt(prof,d.elevM,d.sfc.t[i],d.sfc.td[i]);
+    est.baseFt.push(base);est.ssi.push(a?.ssi??null);est.cape.push(a?.cape??null);
+    const cond={clouds:base!=null?[{cover:'BKN',base}]:[],wind:{dir:d.sfc.windDir[i],spd:Math.round(d.sfc.windSpd[i])},wx:[]};
+    judge.push(judgeNwp(cond,mn,{runways:rw}).level);
+    return a;
+  });
+  if(tab==='meteo'){
+    box.innerHTML=`<h3>メテオグラム（${esc(VERT.icao)}）<span class="sp"></span><span class="note">水色の帯＝飛行予定の時間帯</span></h3><canvas id="cvMeteo"></canvas>
+      <p class="note">気温・露点、地上風（矢羽）、雲量（上から上層・中層・下層）と<span style="color:var(--mag)">推定雲底</span>、降水量、海面気圧、安定度（線＝SSI、棒＝CAPE）。雲底は数値予報からの推定です。</p>`;
+    const metarNow=metarPoint(d);
+    meteogram($('#cvMeteo'),{times:d.times,sfc:d.sfc,est},{window:w,metar:metarNow});
+  }else if(tab==='xs'){
+    box.innerHTML=`<h3>予報断面図（${esc(VERT.icao)}）<span class="sp"></span><span class="note">上の帯＝推定の判定</span></h3><canvas id="cvXs"></canvas>
+      <p class="note">塗り＝相対湿度（濃い青＝90%以上で雲がある可能性）、矢羽＝各層の風、水色の破線＝0℃高度、水色の枠＝飛行予定の時間帯。上の色帯は推定の雲底と風によるミニマ判定です（視程は数値予報に無いので見ていません）。</p>`;
+    crossSection($('#cvXs'),{times:d.times,prof:d.prof,elevM:d.elevM},{window:w,topFt,judge});
+  }else{
+    const i=Math.min(VERT.hour,d.times.length-1);
+    box.innerHTML=`<h3>Skew-T（${esc(VERT.icao)}）</h3><div id="skBar"></div><canvas id="cvSkew"></canvas>
+      <p class="note">橙＝気温、水色＝露点、桃色の破線＝地上の気塊を持ち上げた経路とLCL。細い線は乾燥断熱線（橙）・湿潤断熱線（緑破線）・等飽和混合比線（水色点線）。右端は各層の風。</p>`;
+    const items=d.times.map((t,k)=>({label:`${fBoth(t)}`,k}));
+    timeBar($('#skBar'),items,it=>{VERT.hour=it.k;const p=d.prof[it.k];skewT($('#cvSkew'),p,{parcel:p[0],elevM:d.elevM});renderIdx(an[it.k],it.k)},{startIdx:i});
+    return;
+  }
+  renderIdx(an[nearestIdx(d.times,new Date())],nearestIdx(d.times,new Date()));
+}
+function nearestIdx(times,t){let b=0,bd=Infinity;times.forEach((x,i)=>{const dd=Math.abs(x-t);if(dd<bd){bd=dd;b=i}});return b}
+/* METARの実測値を点で重ねる(予報とのずれを見る) */
+function metarPoint(d){
+  const {metar}=pickSources(VERT.icao);
+  if(!metar?.p?.time) return null;
+  const i=nearestIdx(d.times,metar.p.time);
+  if(Math.abs(d.times[i]-metar.p.time)>3600e3) return null;
+  return {i,t:metar.p.temp,td:metar.p.dew};
+}
+/* 安定度などの数値と注意表示 */
+function renderIdx(a,i){
+  const el=$('#vIdx');if(!el)return;
+  if(!a){el.innerHTML='';return}
+  const d=VERT.data,mn=store.get('wx.minima')||{},topFt=+((mn.flightTopFt)||10000);
+  const row=(label,value,level,why)=>`<tr><td style="width:8.5em"><span class="lvl ${level}"></span>${label}</td><td class="m">${value}${why?`<div class="why">${esc(why)}</div>`:''}</td></tr>`;
+  const ssiLv=a.ssi==null?'none':a.ssi<=0?'caution':'go';
+  const capeLv=a.cape==null?'none':a.cape>=1000?'caution':'go';
+  const shearLv=a.shear0to5000==null?'none':a.shear0to5000>=25?'caution':'go';
+  const fzLv=a.freezingInFlight&&a.moistInFlight?'caution':'go';
+  const invLv=a.inversions.some(x=>x.surface)&&a.moist.some(m=>m.fromFt!=null&&m.fromFt<1000)?'caution':'go';
+  const ceilLv=a.cloudBaseFt==null?'none':(mn.ceilFt&&a.cloudBaseFt<+mn.ceilFt?'caution':'go');
+  el.innerHTML=`<h3>この時刻の判定材料<span class="sp"></span><span class="note">${fBoth(d.times[i])}</span></h3>
+  <table class="t">
+    ${row('SSI',a.ssi==null?'—':a.ssi,ssiLv,a.ssi!=null&&a.ssi<=0?'0以下：雷の可能性':'850hPaの気塊を500hPaへ持ち上げた差')}
+    ${row('LI',a.li==null?'—':a.li,a.li!=null&&a.li<=0?'caution':'go','地上の気塊を500hPaへ持ち上げた差')}
+    ${row('CAPE',a.cape==null?'—':`${a.cape} J/kg`,capeLv,a.cape>=1000?'1000以上：発達した対流の可能性':'')}
+    ${row('LCL（雲底の目安）',a.lclFt==null?'—':`${a.lclFt}ft`,ceilLv,'地上の気塊が凝結する高さ（推定）')}
+    ${row('推定雲底(Espy)',a.cloudBaseFt==null?'—':`${a.cloudBaseFt}ft`,ceilLv,'地上の気温と露点の差から')}
+    ${row('0℃高度',a.freezingFt==null?'—':`${a.freezingFt}ft`,fzLv,a.freezingInFlight?(a.moistInFlight?'飛行高度帯にあり、湿潤層と重なる：着氷に注意':'飛行高度帯にある'):`飛行高度帯（地上〜${topFt}ft）の外`)}
+    ${row('湿潤層',a.moist.length?a.moist.map(m=>`${m.fromFt}〜${m.toFt}ft`).join('、'):'なし',a.moistInFlight?'caution':'go','気温と露点の差が3℃以下の層（雲がある可能性）')}
+    ${row('逆転層',a.inversions.length?a.inversions.map(x=>`${Math.round((x.fromZ-d.elevM)*M_FT)}〜${Math.round((x.toZ-d.elevM)*M_FT)}ft(+${x.dT}℃)`).join('、'):'なし',invLv,invLv==='caution'?'地上付近の逆転層＋湿潤：霧・低い雲が残りやすい':'')}
+    ${row('風のシアー',a.shear0to5000==null?'—':`${a.shear0to5000}kt`,shearLv,'地上〜5,000ftの風ベクトルの差。25kt以上で乱気流に注意')}
+  </table>
+  <p class="note">しきい値は目安です。指数の計算は単体テストで教科書の値と照合しています（tests/sounding.test.mjs）。</p>`;
+}
+
+const LOADERS={0:loadHome,1:loadSynoptic,2:loadRadarNow,3:loadRadarFcst,5:loadAirfields,6:loadVertical,7:loadTomorrow,8:loadWeekly};
 
 /* ───────── 時計・通信状態 ───────── */
 function tick(){

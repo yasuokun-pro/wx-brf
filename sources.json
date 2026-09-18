@@ -358,5 +358,32 @@
     "image": "https://www.data.jma.go.jp/airinfo/data/pict/taf/{type}_{icao}.png",
     "page": "https://www.data.jma.go.jp/airinfo/data/awfo_taf.html",
     "_note": "type: QMCD98=飛行場時系列予報(fcst) / QMCJ98=飛行場時系列情報(info)"
+  },
+  "nwp": {
+    "_note": "数値予報(気象庁MSM/GSM)。CAPE・視程・ガスト・0℃高度は値が入らないので lib/sounding.js で計算する。無料APIは非商用のみ・1日1万回まで・出典表示(CC BY 4.0)",
+    "url": "https://api.open-meteo.com/v1/jma",
+    "page": "https://open-meteo.com/en/docs/jma-api",
+    "days": 3,
+    "surface": [
+      "temperature_2m",
+      "dew_point_2m",
+      "wind_direction_10m",
+      "wind_speed_10m",
+      "precipitation",
+      "pressure_msl",
+      "surface_pressure",
+      "cloud_cover_low",
+      "cloud_cover_mid",
+      "cloud_cover_high"
+    ],
+    "levelVars": [
+      "temperature",
+      "relative_humidity",
+      "wind_direction",
+      "wind_speed",
+      "geopotential_height",
+      "cloud_cover"
+    ],
+    "attribution": "Open-Meteo（気象庁モデル）"
   }
 }

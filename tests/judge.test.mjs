@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseMetar, parseTaf } from '../lib/metar.js';
-import { judgeMetar, judgeTaf, tafTimeline, worst, flightRule } from '../lib/judge.js';
+import { judgeMetar, judgeTaf, judgeNwp, tafTimeline, worst, flightRule } from '../lib/judge.js';
 
 const REF = new Date(Date.UTC(2026, 8, 17, 6, 0));
 const MIN = {
@@ -221,4 +221,15 @@ test('VMC/SVFR/IMC：METAR判定とTAFの時間ごとに付く', () => {
   assert.deepEqual(f(Date.UTC(2026, 8, 17, 21)), ['VMC', 'IMC']);
   /* FM 以降の BKN005 9999 は本体がSVFR */
   assert.deepEqual(f(Date.UTC(2026, 8, 18, 3)), ['SVFR', null]);
+});
+
+test('数値予報からの推定の判定：視程は見ない', () => {
+  const cond = { clouds: [{ cover: 'BKN', base: 800 }], wind: { dir: 200, spd: 12 }, wx: [] };
+  const r = judgeNwp(cond, MIN, { runways: [340, 160] });
+  assert.equal(r.items.some(i => i.key === 'vis'), false);
+  assert.equal(r.items.find(i => i.key === 'ceil').level, 'nogo');
+  assert.equal(r.level, 'nogo');
+  assert.equal(r.estimated, true);
+  /* 雲底が高く風も弱ければGO（視程が無くても灰にならない） */
+  assert.equal(judgeNwp({ clouds: [{ cover: 'BKN', base: 4000 }], wind: { dir: 200, spd: 8 }, wx: [] }, MIN, {}).level, 'go');
 });
