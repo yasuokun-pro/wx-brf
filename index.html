@@ -183,7 +183,7 @@ import { judgeMetar, judgeTaf, judgeNwp, worst, LEVEL_JA, FR_RANK } from './lib/
 import { makeProfile, analyze, cloudBaseEspy, M_FT } from './lib/sounding.js';
 import { meteogram, crossSection, skewT } from './lib/charts.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p4-1', BUILD='2026-09-18';
+const VER_TAG='p4-2', BUILD='2026-09-18';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -1260,7 +1260,18 @@ function estBaseFt(prof,elevM,tC,tdC){
   }
   return cloudBaseEspy(tC,tdC);
 }
-const nwpPos=icao=>{const o=adOpt(icao);return (o.lat!=null&&o.lon!=null&&o.lat!==''&&o.lon!=='')?{lat:+o.lat,lon:+o.lon}:null};
+/* 飛行場の位置：設定で入れた値が最優先。無ければ同梱の一覧(airports.json・OurAirports)から自動で入れる */
+let AIRPOS=null;
+async function airportTable(){
+  if(!AIRPOS){try{AIRPOS=(await getJSON('airports.json?v='+VER_TAG)).data.airports}catch(e){AIRPOS={}}}
+  return AIRPOS;
+}
+async function nwpPos(icao){
+  const o=adOpt(icao);
+  if(o.lat!=null&&o.lon!=null&&o.lat!==''&&o.lon!=='') return {lat:+o.lat,lon:+o.lon,src:'設定'};
+  const t=await airportTable(),a=t[icao];
+  return a?{lat:a.lat,lon:a.lon,src:'公開データ',name:a.n}:null;
+}
 
 async function loadVertical(){
   const b=$('#scr6 .body'),ids=adList();
@@ -1268,11 +1279,21 @@ async function loadVertical(){
   b.innerHTML=`
   <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
   <div class="card">
-    <h3>飛行場<span class="sp"></span><span id="vTabs" class="seg"><button data-t="meteo" class="on">メテオグラム</button><button data-t="xs">断面図</button><button data-t="skew">Skew-T</button></span></h3>
+    <h3>飛行場<span class="sp"></span><span id="vTabs" class="seg">${[['meteo','メテオグラム'],['xs','断面図'],['skew','Skew-T']].map(([k,l])=>`<button data-t="${k}" class="${(store.get('wx.vertTab')||'meteo')===k?'on':''}">${l}</button>`).join('')}</span></h3>
     <div class="row" id="vAdRow">${ids.length?ids.map(i=>`<button data-ad="${i}" class="${i===cur?'on':''}">${i}</button>`).join(''):'<span class="note">ホーム画面で飛行場を入れてください</span>'}</div>
     <div class="row" id="vPos"></div>
     <div id="vMeta" class="meta"></div>
   </div>
+  <details class="card"><summary>この画面の使い方</summary>
+    <p class="note">数値予報から作った図で、<b>飛行時間帯にどんな雲・風・気温の層が来るか</b>を見ます。気象庁が発表する飛行場予報とは別物なので、画面5の公式の飛行場時系列予報と見比べてください。</p>
+    <table class="t">
+      <tr><th style="width:7em">タブ</th><th>見るところ</th></tr>
+      <tr><td>メテオグラム</td><td>時間の流れ。気温と露点が近づく時間帯＝霧・低い雲、地上風の矢羽が増える時間帯＝強風、降水の始まりと終わり、気圧の下がり方＝前線や低気圧の通過</td></tr>
+      <tr><td>断面図</td><td>飛行時間帯（水色の枠）に<b>濃い青（湿度90%以上＝雲の可能性）がどの高度に来るか</b>。0℃高度の破線が飛行高度にかかるか。上の色帯は推定の判定</td></tr>
+      <tr><td>Skew-T</td><td>その時刻の縦の構造。地上付近で気温の線が右に曲がる＝逆転層（霧・低い雲が残りやすい）。気温と露点の線が近い高度＝雲。桃色のLCLが雲底の目安</td></tr>
+    </table>
+    <p class="note">下の「この時刻の判定材料」に、SSI・CAPE（雷の可能性）、0℃高度（着氷）、湿潤層、逆転層、風のシアー（乱気流）が数値と色で出ます。緑＝問題なし、黄＝注意です。雲底・雲量は推定です。</p>
+  </details>
   <div class="card" id="vBox"><div class="loading">読み込み中…</div></div>
   <div class="card" id="vIdx"></div>
   <div class="card"><h3>公式の資料と並べて見る</h3><div id="vOfficial" class="note">気象庁の飛行場時系列予報は画面5にもあります。</div>
@@ -1280,16 +1301,19 @@ async function loadVertical(){
   $('#vAdRow').onclick=e=>{const x=e.target.closest('[data-ad]');if(!x)return;store.set('wx.vertAd',x.dataset.ad);loaded.delete(6);activate(curIdx)};
   $('#vTabs').onclick=e=>{const x=e.target.closest('button');if(!x)return;$('#vTabs').querySelectorAll('button').forEach(y=>y.classList.toggle('on',y===x));store.set('wx.vertTab',x.dataset.t);drawVertical()};
   if(!cur){$('#vBox').innerHTML='<p class="note">飛行場を選ぶと、数値予報から断面図などを作ります。</p>';return}
-  const pos=nwpPos(cur);
-  $('#vPos').innerHTML=`<label class="chk" style="min-width:0">緯度<input data-lat value="${esc(adOpt(cur).lat??'')}" placeholder="35.553" style="width:6.5em"></label>
-    <label class="chk" style="min-width:0">経度<input data-lon value="${esc(adOpt(cur).lon??'')}" placeholder="139.781" style="width:6.5em"></label>
-    <button id="vPosSave">保存</button><span class="note">${esc(cur)}の位置（端末内だけに保存。地図アプリの座標を貼れます）</span>`;
+  const pos=await nwpPos(cur);
+  $('#vPos').innerHTML=`<details style="width:100%"><summary>${pos?`位置：${pos.lat} ${pos.lon}（${esc(pos.src)}${pos.name?'：'+esc(pos.name):''}）`:`<span style="color:var(--amb)">${esc(cur)}の位置が分かりません。緯度・経度を入れてください</span>`}</summary>
+    <div class="row"><label class="chk" style="min-width:0">緯度<input data-lat value="${esc(adOpt(cur).lat??'')}" placeholder="${pos?pos.lat:'35.5497'}" style="width:6.5em"></label>
+    <label class="chk" style="min-width:0">経度<input data-lon value="${esc(adOpt(cur).lon??'')}" placeholder="${pos?pos.lon:'139.787'}" style="width:6.5em"></label>
+    <button id="vPosSave">保存</button><button id="vPosClr">自動に戻す</button></div>
+    <p class="note">数値予報を取る地点です。空欄なら同梱の一覧（OurAirports・パブリックドメイン）の値を使います。AIPの公式な値ではないので、正確な位置にしたいときは地図アプリの座標を入れてください。設定は端末内だけに保存します。</p></details>`;
+  $('#vPosClr').onclick=()=>{setAdOpt(cur,{lat:'',lon:''});loaded.delete(6);activate(curIdx)};
   $('#vPosSave').onclick=()=>{
     const lat=parseFloat($('#vPos [data-lat]').value),lon=parseFloat($('#vPos [data-lon]').value);
     if(!Number.isFinite(lat)||!Number.isFinite(lon)){alert('緯度・経度を数字で入れてください');return}
     setAdOpt(cur,{lat,lon});loaded.delete(6);activate(curIdx);
   };
-  if(!pos){$('#vBox').innerHTML='<p class="note">この飛行場の緯度・経度を入れてください。数値予報はこの位置で取ります。</p>';$('#vIdx').innerHTML='';return}
+  if(!pos){$('#vBox').innerHTML='<p class="note">この飛行場は同梱の一覧に無いので、上の「位置」を開いて緯度・経度を入れてください。</p>';$('#vIdx').innerHTML='';return}
   setStatus('nwp',{label:'数値予報（気象庁モデル）',pubLabel:'取得',staleMin:180});
   try{
     VERT.data=await fetchNwp2(pos.lat,pos.lon);
