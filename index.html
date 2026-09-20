@@ -86,6 +86,15 @@
   .loading{color:var(--dim);font-size:13px;padding:14px;text-align:center;background:var(--panel2)}
 
   .map{height:58vh;min-height:300px;border-radius:6px;background:#0d1a29}
+  /* 地図の中心の十字（「地図の中心を追加」で使う）。地図の操作は邪魔しない */
+  .mapwrap{position:relative}
+  .xhair{position:absolute;left:50%;top:50%;width:46px;height:46px;transform:translate(-50%,-50%);z-index:600;pointer-events:none}
+  .xhair::before,.xhair::after{content:'';position:absolute;background:var(--amb);box-shadow:0 0 0 1px rgba(10,20,32,.8)}
+  .xhair::before{left:50%;top:0;width:2px;height:100%;transform:translateX(-50%)}
+  .xhair::after{top:50%;left:0;height:2px;width:100%;transform:translateY(-50%)}
+  .xhair i{position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border:2px solid var(--amb);border-radius:50%;box-shadow:0 0 0 1px rgba(10,20,32,.8)}
+  .xhairLabel{position:absolute;left:50%;top:calc(50% + 30px);transform:translateX(-50%);z-index:600;pointer-events:none;
+    background:rgba(10,20,32,.85);border:1px solid var(--line);border-radius:4px;color:var(--amb);font-family:var(--mono);font-size:11px;padding:2px 6px;white-space:nowrap}
   .map.sat{height:50vh}
   /* 地理院の淡色地図を暗く反転してダーク表示に合わせる(重ねる気象タイルには掛けない) */
   .basemap-dark{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9)}
@@ -191,7 +200,7 @@ import { meteogram, crossSection, skewT } from './lib/charts.js';
 import { addObs, addSnapshot, pairs as vPairs, stats as vStats, correction as vCorrection, applyCorrection, LEAD_BUCKETS, VARS as V_VARS } from './lib/verify.js';
 import { splitRoute, passTimes, routeNM, routeMinutes, judgeRoute, judgePass, parseRouteCode, distNM } from './lib/route.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p4-9', BUILD='2026-09-20';
+const VER_TAG='p4-10', BUILD='2026-09-20';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -1636,10 +1645,10 @@ async function loadRoute(){
     </table>`)}
   <div class="card">
     <h3>経路<span class="sp"></span><span id="rteTotal"></span><button id="rteGo">判定する</button></h3>
-    <div class="map" id="mapRte" style="height:46vh"></div>
+    <div class="mapwrap"><div class="map" id="mapRte" style="height:46vh"></div><div class="xhair"><i></i></div><div class="xhairLabel" id="rteCenter">—</div></div>
     <div class="row"><button id="rteUndo">最後の点を消す</button><button id="rteClr">全部消す</button>
       <span class="note" id="rteInfo"></span></div>
-    <p class="note">地図をタップすると点が増え、ドラッグで動かせます。点をタップすると消えます。経路は端末内だけに保存します。</p>
+    <p class="note">地図をタップすると点が増え、ドラッグで動かせます。点をタップすると消えます。経路は端末内だけに保存します。<b style="color:var(--amb)">橙の十字</b>は地図の中心で、下の「気象変換点」の登録位置になります。</p>
     <details><summary>ナビPWAの経路を取り込む</summary>
       <p class="note">ナビPWAの「共有」で出した共有コード（HNAV1.…）か、書き出したJSONを貼ってください。</p>
       <textarea id="rtePaste" placeholder="HNAV1.eyJ2IjoxLC..."></textarea>
@@ -1675,6 +1684,9 @@ async function loadRoute(){
 
   /* 地図と経路の編集 */
   RTEMAP=makeMap('mapRte');
+  /* 中心の座標を出す（「地図の中心を追加」で入る位置） */
+  const showCenter=()=>{const c=RTEMAP.getCenter();const el=$('#rteCenter');if(el)el.textContent=`${c.lat.toFixed(4)} ${c.lng.toFixed(4)}`};
+  RTEMAP.on('move',showCenter);showCenter();
   drawRouteEdit();
   /* 経路があれば全体が入るように合わせる */
   if(routeWps().length>1) RTEMAP.fitBounds(L.latLngBounds(routeWps().map(w=>[w.lat,w.lng])).pad(0.25));
@@ -1895,9 +1907,9 @@ function renderPasses(){
   const el=$('#rtePass');if(!el)return;
   const pts=passPoints(),m=passCfg();
   el.innerHTML=`
-    <h3>気象変換点（峠）とライブカメラ<span class="sp"></span><button id="ptAdd">地図の中心を追加</button><button id="ptWx">予報を取り直す</button></h3>
+    <h3>気象変換点（峠）とライブカメラ<span class="sp"></span><button id="ptAdd">十字の位置を追加</button><button id="ptWx">予報を取り直す</button></h3>
     <p class="note">峠は「推定雲底が 峠の標高＋間隔（${m.clearanceFt}ft）より上か」で目安を出します。<b>視程は数値予報に無いので判定しません</b>。登録したカメラで実際の見え方を確かめてください。点とカメラのURLは端末内だけに保存します。</p>
-    ${pts.length?'':'<p class="note">まだ登録がありません。地図を峠に合わせて「地図の中心を追加」を押すと、地理院の標高を自動で取り込みます。</p>'}
+    ${pts.length?'':'<p class="note">まだ登録がありません。地図の<b style="color:var(--amb)">十字</b>を峠に合わせて「十字の位置を追加」を押すと、その位置の標高（地理院の1mレーザー測量）を自動で取り込みます。</p>'}
     <div id="ptList"></div>`;
   $('#ptAdd').onclick=async()=>{
     if(!RTEMAP)return;
