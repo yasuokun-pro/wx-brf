@@ -55,6 +55,9 @@
   #deck::-webkit-scrollbar{display:none}
   .scr{flex:0 0 100%;width:100%;overflow-y:auto;scroll-snap-align:start;scroll-snap-stop:always;padding:10px 10px 24px;overscroll-behavior-y:contain}
   .scr>h2{font-size:17px;font-weight:700;margin:4px 4px 10px;display:flex;align-items:center;gap:8px}
+  .scr>h2 .sp{flex:1}
+  .learnBtn{font-size:11px;padding:3px 8px;white-space:nowrap}
+  .learnBtn.on{border-color:var(--amb);color:var(--amb)}
   .scr>h2 .n{font-family:var(--mono);color:var(--grn)}
 
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;max-width:1100px;margin-left:auto;margin-right:auto}
@@ -188,7 +191,7 @@ import { meteogram, crossSection, skewT } from './lib/charts.js';
 import { addObs, addSnapshot, pairs as vPairs, stats as vStats, correction as vCorrection, applyCorrection, LEAD_BUCKETS, VARS as V_VARS } from './lib/verify.js';
 import { splitRoute, passTimes, routeNM, routeMinutes, judgeRoute, judgePass, parseRouteCode, distNM } from './lib/route.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p4-6', BUILD='2026-09-20';
+const VER_TAG='p4-9', BUILD='2026-09-20';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -263,22 +266,45 @@ const SCREENS=[
 ];
 let SRCDEF=null;
 const loaded=new Set();
-let curIdx=0;
+let curIdx=0,navLock=0;
 
 function buildShell(){
   $('#tabs').innerHTML=SCREENS.map((s,i)=>`<button data-i="${i}" class="${s.later?'later':''}"><span class="n">${s.n}</span>${s.name}</button>`).join('');
-  $('#deck').innerHTML=SCREENS.map((s,i)=>`<section class="scr" id="scr${s.n}" data-i="${i}"><h2><span class="n">${s.n}</span>${s.name}</h2><div class="body"></div></section>`).join('');
+  $('#deck').innerHTML=SCREENS.map((s,i)=>`<section class="scr" id="scr${s.n}" data-i="${i}"><h2><span class="n">${s.n}</span>${s.name}<span class="sp"></span><button class="learnBtn">学習モード</button></h2><div class="body"></div></section>`).join('');
+  /* 学習モードは各画面の見出しから切り替える（ホームに戻らなくてよい） */
+  $('#deck').addEventListener('click',e=>{if(e.target.closest('.learnBtn'))toggleLearn()});
+  syncLearnBtns();
   $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)goTo(+b.dataset.i)});
   $('#prev').onclick=()=>goTo(curIdx-1);
   $('#next').onclick=()=>goTo(curIdx+1);
   let t=null;
+  /* ⚠ 画面の中身を作り直すと横スクロール位置がずれて、別の画面に飛ぶことがある。
+     作り直しの直後は少しの間スクロールでの切り替えを止める(navLock) */
   $('#deck').addEventListener('scroll',()=>{clearTimeout(t);t=setTimeout(()=>{
+    if(Date.now()<navLock) return;
     const i=Math.round($('#deck').scrollLeft/$('#deck').clientWidth);if(i!==curIdx)activate(i)},90)},{passive:true});
   window.addEventListener('resize',()=>{$('#deck').scrollLeft=curIdx*$('#deck').clientWidth});
   for(const s of SCREENS) if(s.later) $(`#scr${s.n} .body`).innerHTML=laterHtml(s);
 }
+function toggleLearn(){
+  store.set('wx.learn',!learnOn());
+  syncLearnBtns();
+  /* 学習モードの内容を埋め込んでいる画面は作り直す */
+  const cur=SCREENS[curIdx].n;
+  const screens=[0,1,2,3,4,5,6,7,8];
+  for(const n of screens) loaded.delete(n);
+  for(const n of screens) if(n!==cur&&$(`#scr${n}`)) $(`#scr${n} .body`).innerHTML='';
+  navLock=Date.now()+800;
+  $('#deck').scrollLeft=curIdx*$('#deck').clientWidth;
+  activate(curIdx);
+}
+function syncLearnBtns(){
+  const on=learnOn();
+  document.querySelectorAll('.learnBtn').forEach(b=>{b.classList.toggle('on',on);b.textContent=on?'学習モード ON':'学習モード'});
+}
 function goTo(i){
   i=Math.max(0,Math.min(SCREENS.length-1,i));
+  navLock=0;
   $('#deck').scrollTo({left:i*$('#deck').clientWidth,behavior:'smooth'});
   activate(i);
 }
@@ -290,7 +316,9 @@ function activate(i){
   const nx=SCREENS[i+1];$('#navMid').textContent=nx?`次：${nx.n} ${nx.name}`:'最後の画面';
   const s=SCREENS[i];
   if(!loaded.has(s.n)&&LOADERS[s.n]){loaded.add(s.n);LOADERS[s.n]().catch(e=>console.error(e))}
-  setTimeout(()=>MAPS.forEach(m=>m.invalidateSize()),350);
+  /* 作り直しで消えた地図は外す（invalidateSizeでエラーになるため） */
+  for(let k=MAPS.length-1;k>=0;k--) if(!document.body.contains(MAPS[k].getContainer())) MAPS.splice(k,1);
+  setTimeout(()=>MAPS.forEach(m=>{try{m.invalidateSize()}catch(e){}}),350);
 }
 function laterHtml(s){
   return `<div class="card"><h3>${s.name}<span class="sp"></span><span class="badge none">データなし</span></h3>
@@ -506,7 +534,7 @@ async function loadHome(){
   b.querySelectorAll('[data-go]').forEach(a=>a.onclick=e=>{e.preventDefault();goTo(SCREENS.findIndex(s=>s.n===+a.dataset.go))});
   const save=()=>{store.set('wx.cfg',{...(store.get('wx.cfg')||{}),when:$('#cfgWhen').value,ret:$('#cfgRet').value,ad:$('#cfgAd').value.toUpperCase().replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim(),office:$('#cfgOffice').value});winNote()};
   const winNote=()=>{const w=flightWindow();$('#winNote').textContent=`判定する時間帯：${fJst(w.from)} 〜 ${fJst(w.to)} JST${w.auto?'（出発予定が未入力のため、今から3時間）':''}`};
-  $('#cfgLearn').onchange=e=>{store.set('wx.learn',e.target.checked);for(const n of [1,5,6]) loaded.delete(n);};
+  $('#cfgLearn').onchange=e=>{store.set('wx.learn',e.target.checked);syncLearnBtns();for(const n of [1,2,3,4,5,6,7,8]) loaded.delete(n)};
   $('#cfgWhen').onchange=()=>{save();loaded.delete(5)};$('#cfgRet').onchange=()=>{save();loaded.delete(5)};$('#cfgAd').onchange=()=>{save();loaded.delete(5)};
   winNote();renderJudges();
   $('#cfgOffice').onchange=()=>{save();loaded.delete(7);loaded.delete(8)};
@@ -760,6 +788,14 @@ async function loadRadarNow(){
   const b=$('#scr2 .body'),N=SRCDEF.nowcast;
   b.innerHTML=`
   <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${learnBox(`<h4>レーダー実況の見どころ</h4>
+    <table class="t">
+      <tr><td style="width:7em">動きを見る</td><td>スライダーを前後に動かして、エコーがどちらへ・どれくらいの速さで動いているかを見る。1時間先の位置は、その動きの延長で見当がつく。</td></tr>
+      <tr><td>強さ</td><td>黄色（20mm/h）以上は視程が急に落ちる。橙・赤は雲底も下がり、乱気流も強い。</td></tr>
+      <tr><td>形</td><td>線状に並ぶエコーは前線や収束線。丸い塊が次々出るのは対流性（雷・突風に注意）。</td></tr>
+      <tr><td>山沿い</td><td>山にかかって止まっているエコーは地形性。風向が変わるまで居座ることが多い。</td></tr>
+      <tr><td>雷</td><td>活動度1でも積乱雲の下。近づかない。検知点（黄色い点）は実際に落ちた場所。</td></tr>
+    </table>`)}
   <div class="card">
     <h3>降水ナウキャスト（実況・直近1時間）<span class="sp"></span><span class="badge none">判定：フェーズ4</span></h3>
     ${metaEl('nowc')}
@@ -810,6 +846,13 @@ async function loadRadarFcst(){
   const b=$('#scr3 .body'),N=SRCDEF.nowcast,R=SRCDEF.rasrf;
   b.innerHTML=`
   <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${learnBox(`<h4>レーダー予想の見どころ</h4>
+    <table class="t">
+      <tr><td style="width:7em">1時間先まで</td><td>ナウキャスト。今のエコーを動かした予想なので、<b>発生と消滅は苦手</b>。動きの速い雨には強い。</td></tr>
+      <tr><td>それ以降</td><td>降水短時間予報。数値予報が入るので発生・発達も表すが、時刻と場所のずれが出る。</td></tr>
+      <tr><td>使い方</td><td>飛行時間帯にエコーが経路へ入るか、抜けるかを見る。「かかる時間帯」を押さえ、その前後で出発をずらせるかを考える。</td></tr>
+      <tr><td>外れやすい場面</td><td>夏の対流（急に発生）、山沿いの地形性降水、冬の日本海側の筋状雲。カメラや実況で補う。</td></tr>
+    </table>`)}
   <div class="card">
     <h3>降水の予想（1時間先まで5分毎 → 15時間先まで1時間毎）<span class="sp"></span><span class="badge none">判定：フェーズ4</span></h3>
     ${metaEl('nowcF')}${metaEl('rasrf')}
@@ -889,6 +932,14 @@ async function loadTomorrow(){
   const b=$('#scr7 .body'),P=SRCDEF.nwpPdf;
   b.innerHTML=`
   <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${learnBox(`<h4>予想図の見どころ</h4>
+    <table class="t">
+      <tr><td style="width:7em">地上</td><td>低気圧・前線の位置が12時間でどれだけ進むか。等圧線の間隔が狭まる時間帯＝風が強まる。</td></tr>
+      <tr><td>500hPa</td><td>トラフが自分の上空を通る時刻。通過の前が下り坂、後ろは冷たい空気が入って不安定。</td></tr>
+      <tr><td>850hPa</td><td>気温の線が南下すると寒気。風が強い所は低高度も揺れやすい。</td></tr>
+      <tr><td>700hPa上昇流</td><td>上昇流の強い所は雲が厚く、雨も強い。湿数の小さい域と重なるほど確か。</td></tr>
+      <tr><td>相当温位(FXJP854)</td><td>高い空気が流れ込む所は大雨になりやすい。前線の位置の目安にもなる。</td></tr>
+    </table>`)}
   <div class="card">
     <h3>地上予想天気図<span class="sp"></span><span class="seg" id="wmfSeg"><button data-k="ft24" class="on">24h予想</button><button data-k="ft48">48h予想</button></span></h3>
     ${metaEl('wmF')}
@@ -1001,6 +1052,13 @@ async function loadWeekly(){
     <p class="note">前半の水色の時刻は気象庁の天気図（実況・24h・48h予想。前線入り）。後半はその翌日からの週間天気図（FEAS）の下段「地上気圧・850hPa気温」の日本付近で、天気図と同じ向き（東経140度が真上）に回して日本を赤で強調したもの（前線は描かれていません）。気象庁は3日目以降の地上予想天気図を公開していません。</p>
   </div>
   ${nwpCardHtml(P.weekly)}
+  ${learnOn()?`<div class="learn"><h4>週間の見どころ</h4>
+    <table class="t">
+      <tr><td style="width:7em">並べて見る</td><td>サムネイルを順に送って、高気圧と低気圧がどう入れ替わるかを見る。同じ場所に何日も居座るのか、次々通るのかで、予備日の取り方が変わる。</td></tr>
+      <tr><td>信頼度</td><td>A＞B＞C。CやBの日は予報が変わりやすいので、前日にもう一度見る。</td></tr>
+      <tr><td>ずれ方</td><td>週間は時刻のずれが大きい。「◯日は崩れる」ではなく「◯日ごろから下り坂」と捉える。</td></tr>
+      <tr><td>使い方</td><td>3日目以降は日ごとの傾向だけを見て、詳しい判断は前日の画面7と当日の画面5・6で行う。</td></tr>
+    </table></div>`:''}
   <div class="card"><h3>週間天気予報</h3>${metaEl('wk')}<div id="fcWeek" class="wk loading">読み込み中…</div>
     <p class="note">府県予報区はホーム画面で変えられます。信頼度 A＞B＞C。</p></div>
   <div class="card"><h3>週間予報解説資料<span class="sp"></span><button id="btnShukan">表示する</button></h3>${metaEl('shukan')}<div id="shukanBox"><p class="note">PDF。フェーズ3でAI解説の入力にします。</p></div></div>
@@ -1568,6 +1626,14 @@ async function loadRoute(){
   const fig=store.get('wx.sigwxFig')||(S.detailed.figs.find(f=>f.area===figArea)||S.detailed.figs[0]).id;
   b.innerHTML=`
   <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${learnBox(`<h4>経路判定の見どころ</h4>
+    <table class="t">
+      <tr><td style="width:7em">雲底</td><td>表示はMSL（推定雲底＋その場所の地形標高）。飛行高度との差がマイナスなら雲の中。</td></tr>
+      <tr><td>地形</td><td>数値予報の地形は粗いので、実際の尾根はもっと高いことがある。峠は「気象変換点」に登録して地理院の標高で見る。</td></tr>
+      <tr><td>峠</td><td>雲底が「峠の標高＋間隔」より上かが目安。天気が変わる場所なので、手前の区間がGOでも峠で止まることがある。</td></tr>
+      <tr><td>視程</td><td>数値予報に無いので判定していない。ライブカメラと下層悪天予想図で補う。</td></tr>
+      <tr><td>着氷</td><td>0℃高度が飛行高度の近くで、その高度が湿っているときに注意。冬は高度を下げる余地があるかも一緒に見る。</td></tr>
+    </table>`)}
   <div class="card">
     <h3>経路<span class="sp"></span><span id="rteTotal"></span><button id="rteGo">判定する</button></h3>
     <div class="map" id="mapRte" style="height:46vh"></div>
