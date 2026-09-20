@@ -186,8 +186,9 @@ import { judgeMetar, judgeTaf, judgeNwp, worst, LEVEL_JA, FR_RANK } from './lib/
 import { makeProfile, analyze, cloudBaseEspy, M_FT } from './lib/sounding.js';
 import { meteogram, crossSection, skewT } from './lib/charts.js';
 import { addObs, addSnapshot, pairs as vPairs, stats as vStats, correction as vCorrection, applyCorrection, LEAD_BUCKETS, VARS as V_VARS } from './lib/verify.js';
+import { splitRoute, passTimes, routeNM, routeMinutes, judgeRoute, parseRouteCode } from './lib/route.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p4-4', BUILD='2026-09-18';
+const VER_TAG='p4-5', BUILD='2026-09-20';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -253,7 +254,7 @@ const SCREENS=[
   {n:1,name:'総観'},
   {n:2,name:'レーダー実況'},
   {n:3,name:'レーダー予想'},
-  {n:4,name:'経路',later:'フェーズ4'},
+  {n:4,name:'経路'},
   {n:5,name:'飛行場'},
   {n:6,name:'鉛直構造'},
   {n:7,name:'明日の予想'},
@@ -294,7 +295,6 @@ function activate(i){
 function laterHtml(s){
   return `<div class="card"><h3>${s.name}<span class="sp"></span><span class="badge none">データなし</span></h3>
   <p class="note">この画面は${s.later}で作ります。${({
-    4:'下層悪天予想図（詳細版）、経路上の自動判定表、予報官の経路予報の写真添付欄。',
     5:'METAR/TAFの原文と日本語デコード、横風成分、ミニマ判定。国際配信されない飛行場のMETARは写真からテキスト認識でコピーして貼り付ける欄を設けます。',
     9:'各画面の話すポイントをつないだ読み上げ用のブリーフィング台本。'})[s.n]}</p></div>`;
 }
@@ -462,7 +462,7 @@ const JUDGE_ROWS=[
   {n:1,name:'総観',note:'判定なし（解説のみ）',none:1},
   {n:2,name:'レーダー実況',note:'経路周辺の降水・雷（フェーズ4で経路と重ねて判定）'},
   {n:3,name:'レーダー予想',note:'飛行時間帯の降水予想（フェーズ4）'},
-  {n:4,name:'経路',note:'区間ごと（フェーズ4）'},
+  {n:4,name:'経路',note:'区間ごと（雲底・地形・降水・風・着氷）'},
   {n:5,name:'飛行場',note:'METAR/TAFとミニマ（飛行場ごとの最も悪い判定）'},
   {n:6,name:'鉛直構造',note:'数値予報からの推定（判定は断面図の色帯）',none:1},
   {n:7,name:'明日の予想',note:'判定なし（解説のみ）',none:1},
@@ -513,7 +513,7 @@ async function loadHome(){
   $('#btnReload').onclick=()=>{
     const keep=SCREENS[curIdx].n;
     for(const n of [...loaded]) if(n!==0) loaded.delete(n);
-    for(const n of [1,2,3,5,6,7,8]) $(`#scr${n} .body`).innerHTML='';
+    for(const n of [1,2,3,4,5,6,7,8]) $(`#scr${n} .body`).innerHTML='';
     NWP_CACHE.clear();
     MAPS.forEach(m=>m.remove());MAPS.length=0;SRC.clear();PDF_CACHE.clear();renderHomeStatus();
     if(keep!==0){loaded.delete(keep);activate(curIdx)}
@@ -748,6 +748,13 @@ async function loadSat(){
   }catch(e){$('#satBar').innerHTML=errBox(e.message,H.page);setStatus('sat',{err:e.message})}
 }
 
+/* 経路をレーダーの地図にも重ねる（画面2・3） */
+function routeOverlay(map){
+  const wps=store.get('wx.route')||[];
+  if(wps.length<2) return;
+  L.polyline(wps.map(w=>[w.lat,w.lng]),{color:'#ff3df5',weight:3,opacity:.9,dashArray:'6 4'}).addTo(map);
+}
+
 /* ═════════ 2 レーダー実況 ═════════ */
 async function loadRadarNow(){
   const b=$('#scr2 .body'),N=SRCDEF.nowcast;
@@ -765,6 +772,7 @@ async function loadRadarNow(){
     <p class="note">経路ラインの重ね表示と、経路周辺の降水・雷の判定はフェーズ4で追加します。<a href="${N.page}" target="_blank" rel="noopener">気象庁 雨雲の動き ↗</a></p>
   </div>`;
   const map=makeMap('mapNow');
+  routeOverlay(map);
   const rain=new TimeLayer(map,{opacity:.75,maxNativeZoom:N.maxNativeZoom,zIndex:10});
   setStatus('nowc',{label:'降水ナウキャスト',tag:1,staleMin:N.staleMin,pubLabel:'観測'});
   try{
@@ -812,6 +820,7 @@ async function loadRadarFcst(){
     <p class="note">1時間先までは高解像度降水ナウキャスト、それより先は降水短時間予報（1時間雨量）です。<a href="${R.page}" target="_blank" rel="noopener">気象庁 今後の雨 ↗</a></p>
   </div>`;
   const map=makeMap('mapFc');
+  routeOverlay(map);
   const rain=new TimeLayer(map,{opacity:.75,maxNativeZoom:N.maxNativeZoom,zIndex:10});
   const th=new TimeLayer(map,{opacity:.9,maxNativeZoom:N.maxNativeZoom,zIndex:20});
   setStatus('nowcF',{label:'ナウキャスト予想',tag:1,staleMin:N.staleMin,pubLabel:'初期'});
@@ -1534,7 +1543,260 @@ function renderIdx(a,i){
   <p class="note">しきい値は目安です。指数の計算は単体テストで教科書の値と照合しています（tests/sounding.test.mjs）。</p>`;
 }
 
-const LOADERS={0:loadHome,1:loadSynoptic,2:loadRadarNow,3:loadRadarFcst,5:loadAirfields,6:loadVertical,7:loadTomorrow,8:loadWeekly};
+/* ═════════ 4 経路 ═════════ */
+/* 経路を区間に分け、区間ごとに数値予報を取って判定する。経路は端末内だけに保存し、外には送らない
+   （数値予報の問い合わせには区間の中点の座標が要るので、その座標だけがOpen-Meteoに行く） */
+const RTE_FIELDS=[
+  ['gsKt','対地速度(kt)','100'],['altFt','飛行高度(ft MSL)','2000'],['segNM','区間の長さ(NM)','10'],
+  ['clearanceFt','雲底との間隔(ft)','500'],['terrainClearFt','地形との間隔(ft)','500'],
+  ['precipMmh','降水の注意(mm/h)','1'],['windKt','風の注意(kt)','25'],['mountainFt','山岳とみなす標高(ft)','3000'],
+];
+const rteCfg=()=>{
+  const o=store.get('wx.rte')||{};
+  const d={gsKt:100,altFt:2000,segNM:10,clearanceFt:500,terrainClearFt:500,precipMmh:1,windKt:25,mountainFt:3000,icingRh:80};
+  for(const k of Object.keys(d)) if(o[k]!=='' && o[k]!=null && Number.isFinite(+o[k])) d[k]=+o[k];
+  return d;
+};
+const routeWps=()=>store.get('wx.route')||[];
+const setRouteWps=w=>store.set('wx.route',w);
+let RTEMAP=null,RTE={rows:null,level:'none'};
+
+async function loadRoute(){
+  const b=$('#scr4 .body'),S=SRCDEF.sigwx,cfg=rteCfg();
+  const figArea=store.get('wx.sigwxArea')||'kantouKoushin';
+  const fig=store.get('wx.sigwxFig')||(S.detailed.figs.find(f=>f.area===figArea)||S.detailed.figs[0]).id;
+  b.innerHTML=`
+  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  <div class="card">
+    <h3>経路<span class="sp"></span><span id="rteTotal"></span><button id="rteGo">判定する</button></h3>
+    <div class="map" id="mapRte" style="height:46vh"></div>
+    <div class="row"><button id="rteUndo">最後の点を消す</button><button id="rteClr">全部消す</button>
+      <span class="note" id="rteInfo"></span></div>
+    <p class="note">地図をタップすると点が増え、ドラッグで動かせます。点をタップすると消えます。経路は端末内だけに保存します。</p>
+    <details><summary>ナビPWAの経路を取り込む</summary>
+      <p class="note">ナビPWAの「共有」で出した共有コード（HNAV1.…）か、書き出したJSONを貼ってください。</p>
+      <textarea id="rtePaste" placeholder="HNAV1.eyJ2IjoxLC..."></textarea>
+      <div class="row"><button id="rteImport">取り込む</button><span id="rteMsg" class="note"></span></div>
+    </details>
+    <details><summary>飛行の条件</summary>
+      <div class="grid2">${RTE_FIELDS.map(([k,l,ph])=>`<label>${l}<input inputmode="decimal" data-rte="${k}" value="${esc((store.get('wx.rte')||{})[k]??'')}" placeholder="${ph}"></label>`).join('')}</div>
+      <div class="row"><button id="rteSave">保存して判定し直す</button><span class="note">出発時刻はホームの出発予定を使います</span></div>
+    </details>
+  </div>
+  <div class="card" id="rteResult"><p class="note">点を2つ以上置いて「判定する」を押すと、区間ごとに数値予報を取って判定します。</p></div>
+  <div class="card">
+    <h3>下層悪天予想図（詳細版）<span class="sp"></span>
+      <select id="sgArea">${S.detailed.areas.map(([v,n])=>`<option value="${v}" ${v===figArea?'selected':''}>${esc(n)}</option>`).join('')}</select>
+      <select id="sgFig">${S.detailed.figs.filter(f=>f.area===figArea).map(f=>`<option value="${f.id}" ${f.id===fig?'selected':''}>${esc(f.name)}</option>`).join('')}</select></h3>
+    ${metaEl('sigwxD')}
+    ${figHtml('figSgD','下層悪天予想図（詳細版）')}
+    <p class="note">地上〜約15,000ftの悪天を示した図です。自動判定には使わないので、経路の判定表と見比べてください。<a href="${S.pageDetailed}" target="_blank" rel="noopener">元ページ ↗</a></p>
+  </div>
+  <div class="card">
+    <h3>下層悪天予想図（通常版）<span class="sp"></span>
+      <select id="sgNArea">${S.normal.areas.map(([v,n])=>`<option value="${v}">${esc(n)}</option>`).join('')}</select>
+      <select id="sgNFt">${S.normal.fts.map(([v,n])=>`<option value="${v}">${esc(n)}</option>`).join('')}</select></h3>
+    ${metaEl('sigwxN')}
+    ${figHtml('figSgN','下層悪天予想図（通常版）')}
+  </div>
+  <div class="card">
+    <h3>予報官の経路予報（写真）<span class="sp"></span><label class="chk"><input type="file" id="rtePhoto" accept="image/*" style="display:none"><button id="rtePhotoBtn">写真を追加</button></label></h3>
+    <p class="note">ブリーフィングでもらった経路予報などを、この端末の中だけに保存して並べて見られます。外には送りません。</p>
+    <div id="rtePhotos" class="wsGrid"></div>
+  </div>`;
+
+  /* 地図と経路の編集 */
+  RTEMAP=makeMap('mapRte');
+  drawRouteEdit();
+  /* 経路があれば全体が入るように合わせる */
+  if(routeWps().length>1) RTEMAP.fitBounds(L.latLngBounds(routeWps().map(w=>[w.lat,w.lng])).pad(0.25));
+  RTEMAP.on('click',e=>{setRouteWps([...routeWps(),{lat:+e.latlng.lat.toFixed(5),lng:+e.latlng.lng.toFixed(5),name:''}]);drawRouteEdit()});
+  $('#rteUndo').onclick=()=>{const w=routeWps();w.pop();setRouteWps(w);drawRouteEdit()};
+  $('#rteClr').onclick=()=>{if(routeWps().length&&!confirm('経路を全部消します。よろしいですか'))return;setRouteWps([]);drawRouteEdit();$('#rteResult').innerHTML='<p class="note">点を2つ以上置いて「判定する」を押してください。</p>'};
+  $('#rteImport').onclick=()=>{
+    try{const wp=parseRouteCode($('#rtePaste').value);setRouteWps(wp);$('#rteMsg').textContent=`${wp.length}点を取り込みました`;$('#rtePaste').value='';drawRouteEdit();}
+    catch(e){$('#rteMsg').textContent='読めませんでした：'+e.message}
+  };
+  $('#rteSave').onclick=()=>{
+    const o={};b.querySelectorAll('[data-rte]').forEach(i=>o[i.dataset.rte]=i.value.trim());
+    store.set('wx.rte',o);runRoute();
+  };
+  $('#rteGo').onclick=runRoute;
+
+  /* 下層悪天予想図 */
+  const loadSg=()=>{
+    const a=$('#sgArea').value,f=$('#sgFig').value;
+    store.set('wx.sigwxArea',a);store.set('wx.sigwxFig',f);
+    setStatus('sigwxD',{label:'下層悪天予想図（詳細）',pubLabel:'更新',staleMin:S.staleMin,got:null,err:null});
+    getRes(S.detailed.url.replace('{fig}',f)).then(async r=>{setFigImg('figSgD',URL.createObjectURL(await r.res.blob()));setStatus('sigwxD',{pub:r.lastModified,got:r.got,offline:r.offline})})
+      .catch(e=>{setFigErr('figSgD',e.message,S.pageDetailed);setStatus('sigwxD',{err:e.message})});
+  };
+  $('#sgArea').onchange=()=>{
+    const a=$('#sgArea').value;
+    $('#sgFig').innerHTML=S.detailed.figs.filter(f=>f.area===a).map(f=>`<option value="${f.id}">${esc(f.name)}</option>`).join('');
+    loadSg();
+  };
+  $('#sgFig').onchange=loadSg;
+  loadSg();
+  const loadSgN=()=>{
+    const a=$('#sgNArea').value,ft=$('#sgNFt').value;
+    store.set('wx.sigwxN',[a,ft]);
+    setStatus('sigwxN',{label:'下層悪天予想図（通常）',pubLabel:'更新',staleMin:S.staleMin,got:null,err:null});
+    getRes(S.normal.url.replace('{area}',a).replace('{ft}',ft)).then(async r=>{setFigImg('figSgN',URL.createObjectURL(await r.res.blob()));setStatus('sigwxN',{pub:r.lastModified,got:r.got,offline:r.offline})})
+      .catch(e=>{setFigErr('figSgN',e.message,S.page);setStatus('sigwxN',{err:e.message})});
+  };
+  const savedN=store.get('wx.sigwxN');
+  if(savedN){$('#sgNArea').value=savedN[0];$('#sgNFt').value=savedN[1]}
+  $('#sgNArea').onchange=loadSgN;$('#sgNFt').onchange=loadSgN;loadSgN();
+
+  /* 予報官の経路予報の写真 */
+  $('#rtePhotoBtn').onclick=()=>$('#rtePhoto').click();
+  $('#rtePhoto').onchange=async e=>{
+    const f=e.target.files?.[0];if(!f)return;
+    await photoAdd(f);e.target.value='';renderPhotos();
+  };
+  renderPhotos();
+  if(routeWps().length>=2) runRoute();
+}
+
+/* 経路の編集（線とマーカー） */
+function drawRouteEdit(){
+  if(!RTEMAP)return;
+  RTEMAP._rte?.forEach(l=>RTEMAP.removeLayer(l));
+  const wps=routeWps(),layers=[];
+  if(wps.length>1) layers.push(L.polyline(wps.map(w=>[w.lat,w.lng]),{color:'#ff3df5',weight:3}).addTo(RTEMAP));
+  wps.forEach((w,i)=>{
+    const m=L.marker([w.lat,w.lng],{draggable:true,title:w.name||`P${i+1}`}).addTo(RTEMAP);
+    m.on('dragend',e=>{const p=e.target.getLatLng();const a=routeWps();a[i]={...a[i],lat:+p.lat.toFixed(5),lng:+p.lng.toFixed(5)};setRouteWps(a);drawRouteEdit()});
+    m.on('click',()=>{const a=routeWps();a.splice(i,1);setRouteWps(a);drawRouteEdit()});
+    layers.push(m);
+  });
+  RTEMAP._rte=layers;
+  const segs=splitRoute(wps,{maxNM:rteCfg().segNM});
+  const el=$('#rteInfo');
+  if(el) el.textContent=wps.length<2?'点を2つ以上置いてください':`${wps.length}点 ・ ${routeNM(segs)}NM ・ ${routeMinutes(segs,rteCfg().gsKt)}分（${rteCfg().gsKt}kt）・ ${segs.length}区間`;
+}
+
+/* 区間ごとに数値予報を取って判定する */
+async function runRoute(){
+  const box=$('#rteResult'),cfg=rteCfg(),wps=routeWps();
+  const segs0=splitRoute(wps,{maxNM:cfg.segNM});
+  if(segs0.length<1){box.innerHTML='<p class="note">点を2つ以上置いてください。</p>';return}
+  if(segs0.length>40){box.innerHTML=errBox('区間が多すぎます（40まで）。区間の長さを大きくしてください');return}
+  const w=flightWindow();
+  const segs=passTimes(segs0,{start:w.from,gsKt:cfg.gsKt});
+  box.innerHTML='<div class="loading">数値予報を取得中…</div>';
+  setStatus('rte',{label:'経路の数値予報',pubLabel:'取得',staleMin:180,got:null,err:null});
+  try{
+    const N=SRCDEF.nwp;
+    const vars=[...N.surface];
+    for(const p of NWP_LEVELS) for(const v of N.levelVars) vars.push(`${v}_${p}hPa`);
+    const lat=segs.map(s=>s.mid.lat.toFixed(4)).join(','),lon=segs.map(s=>s.mid.lng.toFixed(4)).join(',');
+    const url=`${N.url}?latitude=${lat}&longitude=${lon}&hourly=${vars.join(',')}&forecast_days=3&wind_speed_unit=kn&timezone=UTC`;
+    const r=await getJSON(url);
+    const list=Array.isArray(r.data)?r.data:[r.data];
+    const samples=segs.map((s,i)=>sampleAt(list[i],s.tMid,cfg));
+    RTE=judgeRoute(segs,samples,cfg);
+    setStatus('rte',{pub:r.got,got:r.got,offline:r.offline});
+    renderRoute(r);
+    drawRouteJudged();
+  }catch(e){box.innerHTML=errBox(e.message,SRCDEF.nwp.page);setStatus('rte',{err:e.message})}
+}
+/* 1地点ぶんの予報から、その時刻の値を取り出す */
+function sampleAt(d,t,cfg){
+  if(!d?.hourly) return {};
+  const h=d.hourly,times=h.time.map(x=>new Date(x+'Z'));
+  let i=0,best=Infinity;
+  times.forEach((x,k)=>{const dd=Math.abs(x-t);if(dd<best){best=dd;i=k}});
+  const elevM=d.elevation??0;
+  const rows=[{p:h.surface_pressure[i],t:h.temperature_2m[i],td:h.dew_point_2m[i],z:elevM,dir:h.wind_direction_10m[i],spd:h.wind_speed_10m[i]}];
+  for(const p of NWP_LEVELS){
+    const T=h[`temperature_${p}hPa`]?.[i],Z=h[`geopotential_height_${p}hPa`]?.[i];
+    if(T==null||Z==null||p>=h.surface_pressure[i]) continue;
+    rows.push({p,t:T,rh:h[`relative_humidity_${p}hPa`]?.[i],z:Z,dir:h[`wind_direction_${p}hPa`]?.[i],spd:h[`wind_speed_${p}hPa`]?.[i]});
+  }
+  const prof=makeProfile(rows);
+  const a=analyze(prof,{flightFt:[0,cfg.altFt],elevM});
+  /* 低高度の風：地上・925・850hPa の一番強いもの */
+  let windKt=h.wind_speed_10m[i],windDir=h.wind_direction_10m[i];
+  for(const p of [925,850]){
+    const s=h[`wind_speed_${p}hPa`]?.[i];
+    if(s!=null&&s>windKt&&p<h.surface_pressure[i]){windKt=s;windDir=h[`wind_direction_${p}hPa`]?.[i]}
+  }
+  /* 飛行高度(MSL)の湿度 */
+  const zAlt=cfg.altFt/M_FT;
+  let rhAtAlt=null;
+  const xs=prof.filter(l=>l.z!=null&&l.rh!=null);
+  for(let k=1;k<xs.length;k++) if(zAlt<=xs[k].z){const A=xs[k-1],B=xs[k],f=(zAlt-A.z)/((B.z-A.z)||1);rhAtAlt=A.rh+f*(B.rh-A.rh);break}
+  return {
+    baseFt:estBaseFt(prof,elevM,h.temperature_2m[i],h.dew_point_2m[i]),
+    elevM,windKt,windDir,precipMmh:h.precipitation[i],
+    freezingFt:a?.freezingM==null?null:Math.round(a.freezingM*M_FT),
+    rhAtAlt,thunder:(a?.cape??0)>=1500,cape:a?.cape??null,t:times[i],
+  };
+}
+function renderRoute(r){
+  const box=$('#rteResult'),cfg=rteCfg();
+  const rows=RTE.rows;
+  $('#rteTotal').innerHTML=badge(RTE.level);
+  setJudge(4,RTE.level);
+  box.innerHTML=`
+    <h3>区間ごとの判定<span class="sp"></span>${badge(RTE.level)}</h3>
+    <div class="meta">出発 ${fBoth(rows[0].tFrom)} ・ 到着 ${fBoth(rows[rows.length-1].tTo)} ・ ${routeNM(rows)}NM ・ 飛行高度 ${cfg.altFt}ft MSL ・ 対地速度 ${cfg.gsKt}kt</div>
+    ${metaEl('rte')}
+    <div class="tl"><table class="t"><tr><th>区間</th><th>通過</th><th>判定</th><th>内容</th></tr>
+    ${rows.map((s,i)=>`<tr><td class="m" style="white-space:nowrap">${i+1}<div class="why">${esc(s.legFrom)}→${esc(s.legTo)}</div></td>
+      <td class="m" style="white-space:nowrap">${fJst(s.tMid).slice(6)}</td>
+      <td>${badge(s.level)}</td>
+      <td>${s.items.filter(x=>x.level!=='go').map(x=>`<div><span class="lvl ${x.level}"></span>${esc(x.label)} ${esc(x.value)}<span class="why"> ${esc(x.why)}</span></div>`).join('')||'<span class="note">問題なし</span>'}</td></tr>`).join('')}
+    </table></div>
+    <p class="note">雲底・雲量は数値予報からの推定です。視程と局地的な現象（谷霧・地形性の乱気流）は見ていません。山岳区間には常に注意を出します。下の下層悪天予想図と見比べてください。</p>`;
+}
+/* 判定の色で経路を塗り直す */
+function drawRouteJudged(){
+  if(!RTEMAP||!RTE.rows)return;
+  RTEMAP._rteJ?.forEach(l=>RTEMAP.removeLayer(l));
+  const col={go:'#38e07b',caution:'#ffb02e',nogo:'#ff5c5c',none:'#7d93a8'};
+  RTEMAP._rteJ=RTE.rows.map(s=>L.polyline([[s.from.lat,s.from.lng],[s.to.lat,s.to.lng]],{color:col[s.level]||col.none,weight:6,opacity:.85}).addTo(RTEMAP));
+}
+
+/* ───────── 予報官の経路予報の写真（端末内だけ・IndexedDB） ───────── */
+function idb(){
+  return new Promise((res,rej)=>{
+    const q=indexedDB.open('wxbrf',1);
+    q.onupgradeneeded=()=>{if(!q.result.objectStoreNames.contains('photos'))q.result.createObjectStore('photos',{keyPath:'id'})};
+    q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);
+  });
+}
+async function photoAdd(file){
+  const db=await idb();
+  const buf=await file.arrayBuffer();
+  await new Promise((res,rej)=>{const tx=db.transaction('photos','readwrite');
+    tx.objectStore('photos').put({id:Date.now(),name:file.name,type:file.type,at:new Date().toISOString(),blob:new Blob([buf],{type:file.type})});
+    tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});
+}
+async function photoList(){
+  const db=await idb();
+  return new Promise((res,rej)=>{const q=db.transaction('photos').objectStore('photos').getAll();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>rej(q.error)});
+}
+async function photoDel(id){
+  const db=await idb();
+  await new Promise((res,rej)=>{const tx=db.transaction('photos','readwrite');tx.objectStore('photos').delete(id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});
+}
+async function renderPhotos(){
+  const el=$('#rtePhotos');if(!el)return;
+  try{
+    const list=(await photoList()).sort((a,b)=>b.id-a.id);
+    el.innerHTML=list.length?list.map(p=>`<button class="wsT" data-ph="${p.id}"><div class="im"><img src="${URL.createObjectURL(p.blob)}" alt=""></div><span>${fJst(new Date(p.at))}<i class="src" style="font-style:normal">タップで拡大</i></span></button>`).join(''):'<span class="note">まだありません</span>';
+    el.querySelectorAll('[data-ph]').forEach(b=>{
+      const p=list.find(x=>String(x.id)===b.dataset.ph);
+      b.onclick=()=>openViewer(URL.createObjectURL(p.blob),`経路予報 ${fJst(new Date(p.at))}`);
+      b.oncontextmenu=async e=>{e.preventDefault();if(confirm('この写真を消しますか')){await photoDel(p.id);renderPhotos()}};
+    });
+  }catch(e){el.innerHTML=`<span class="note">写真を読めませんでした：${esc(e.message)}</span>`}
+}
+
+const LOADERS={0:loadHome,1:loadSynoptic,2:loadRadarNow,3:loadRadarFcst,4:loadRoute,5:loadAirfields,6:loadVertical,7:loadTomorrow,8:loadWeekly};
 
 /* ───────── 時計・通信状態 ───────── */
 function tick(){

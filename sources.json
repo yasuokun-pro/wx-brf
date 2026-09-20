@@ -385,5 +385,421 @@
       "cloud_cover"
     ],
     "attribution": "Open-Meteo（気象庁モデル）"
+  },
+  "sigwx": {
+    "_note": "下層悪天予想図。通常版は地域×予想時間、詳細版は都道府県ごとの図番号。3時間毎に発表",
+    "normal": {
+      "url": "https://www.data.jma.go.jp/airinfo/data/pict/low-level_sigwx/{area}{ft}.png",
+      "areas": [
+        [
+          "fbsp",
+          "札幌"
+        ],
+        [
+          "fbsn",
+          "仙台"
+        ],
+        [
+          "fbtk",
+          "東京"
+        ],
+        [
+          "fbos",
+          "大阪"
+        ],
+        [
+          "fbkg",
+          "福岡"
+        ],
+        [
+          "fbok",
+          "那覇"
+        ]
+      ],
+      "fts": [
+        [
+          "03",
+          "1時間後"
+        ],
+        [
+          "06",
+          "4時間後"
+        ],
+        [
+          "09",
+          "7時間後"
+        ],
+        [
+          "39",
+          "3〜9時間後"
+        ]
+      ]
+    },
+    "detailed": {
+      "url": "https://www.data.jma.go.jp/airinfo/data/pict/low-level_sigwx_p/Lsigp_{fig}.png",
+      "areas": [
+        [
+          "hokkaido",
+          "北海道地方"
+        ],
+        [
+          "touhoku",
+          "東北地方"
+        ],
+        [
+          "kantouKoushin",
+          "関東・甲信地方"
+        ],
+        [
+          "toukaiHokuriku",
+          "東海・北陸地方"
+        ],
+        [
+          "kinki",
+          "近畿地方"
+        ],
+        [
+          "chuugoku",
+          "中国地方"
+        ],
+        [
+          "shikoku",
+          "四国地方"
+        ],
+        [
+          "kyuusyuu",
+          "九州地方"
+        ],
+        [
+          "okinawa",
+          "沖縄地方"
+        ]
+      ],
+      "figs": [
+        {
+          "id": "Fig101",
+          "area": "hokkaido",
+          "name": "宗谷"
+        },
+        {
+          "id": "Fig102",
+          "area": "hokkaido",
+          "name": "上川・留萌・空知"
+        },
+        {
+          "id": "Fig104",
+          "area": "hokkaido",
+          "name": "オホーツク"
+        },
+        {
+          "id": "Fig105",
+          "area": "hokkaido",
+          "name": "根室"
+        },
+        {
+          "id": "Fig106",
+          "area": "hokkaido",
+          "name": "釧路・十勝"
+        },
+        {
+          "id": "Fig107",
+          "area": "hokkaido",
+          "name": "胆振・日高"
+        },
+        {
+          "id": "Fig103",
+          "area": "hokkaido",
+          "name": "石狩・後志"
+        },
+        {
+          "id": "Fig108",
+          "area": "hokkaido",
+          "name": "渡島・檜山"
+        },
+        {
+          "id": "Fig201",
+          "area": "touhoku",
+          "name": "青森"
+        },
+        {
+          "id": "Fig203",
+          "area": "touhoku",
+          "name": "岩手"
+        },
+        {
+          "id": "Fig204",
+          "area": "touhoku",
+          "name": "宮城"
+        },
+        {
+          "id": "Fig202",
+          "area": "touhoku",
+          "name": "秋田"
+        },
+        {
+          "id": "Fig205",
+          "area": "touhoku",
+          "name": "山形"
+        },
+        {
+          "id": "Fig206",
+          "area": "touhoku",
+          "name": "福島"
+        },
+        {
+          "id": "Fig301",
+          "area": "kantouKoushin",
+          "name": "茨城"
+        },
+        {
+          "id": "Fig302",
+          "area": "kantouKoushin",
+          "name": "栃木"
+        },
+        {
+          "id": "Fig303",
+          "area": "kantouKoushin",
+          "name": "群馬"
+        },
+        {
+          "id": "Fig304",
+          "area": "kantouKoushin",
+          "name": "埼玉"
+        },
+        {
+          "id": "Fig310",
+          "area": "kantouKoushin",
+          "name": "千葉"
+        },
+        {
+          "id": "Fig305",
+          "area": "kantouKoushin",
+          "name": "東京"
+        },
+        {
+          "id": "Fig306",
+          "area": "kantouKoushin",
+          "name": "大島・新島"
+        },
+        {
+          "id": "Fig307",
+          "area": "kantouKoushin",
+          "name": "三宅島・御蔵島"
+        },
+        {
+          "id": "Fig308",
+          "area": "kantouKoushin",
+          "name": "八丈島・青ヶ島"
+        },
+        {
+          "id": "Fig309",
+          "area": "kantouKoushin",
+          "name": "小笠原"
+        },
+        {
+          "id": "Fig311",
+          "area": "kantouKoushin",
+          "name": "神奈川"
+        },
+        {
+          "id": "Fig313",
+          "area": "kantouKoushin",
+          "name": "山梨"
+        },
+        {
+          "id": "Fig312",
+          "area": "kantouKoushin",
+          "name": "長野"
+        },
+        {
+          "id": "Fig501",
+          "area": "toukaiHokuriku",
+          "name": "新潟"
+        },
+        {
+          "id": "Fig502",
+          "area": "toukaiHokuriku",
+          "name": "富山"
+        },
+        {
+          "id": "Fig503",
+          "area": "toukaiHokuriku",
+          "name": "石川"
+        },
+        {
+          "id": "Fig504",
+          "area": "toukaiHokuriku",
+          "name": "福井"
+        },
+        {
+          "id": "Fig403",
+          "area": "toukaiHokuriku",
+          "name": "岐阜"
+        },
+        {
+          "id": "Fig401",
+          "area": "toukaiHokuriku",
+          "name": "静岡"
+        },
+        {
+          "id": "Fig402",
+          "area": "toukaiHokuriku",
+          "name": "愛知"
+        },
+        {
+          "id": "Fig404",
+          "area": "toukaiHokuriku",
+          "name": "三重"
+        },
+        {
+          "id": "Fig601",
+          "area": "kinki",
+          "name": "滋賀"
+        },
+        {
+          "id": "Fig602",
+          "area": "kinki",
+          "name": "京都"
+        },
+        {
+          "id": "Fig603",
+          "area": "kinki",
+          "name": "大阪"
+        },
+        {
+          "id": "Fig604",
+          "area": "kinki",
+          "name": "兵庫"
+        },
+        {
+          "id": "Fig605",
+          "area": "kinki",
+          "name": "奈良"
+        },
+        {
+          "id": "Fig606",
+          "area": "kinki",
+          "name": "和歌山"
+        },
+        {
+          "id": "Fig704",
+          "area": "chuugoku",
+          "name": "鳥取"
+        },
+        {
+          "id": "Fig703",
+          "area": "chuugoku",
+          "name": "島根"
+        },
+        {
+          "id": "Fig701",
+          "area": "chuugoku",
+          "name": "岡山"
+        },
+        {
+          "id": "Fig702",
+          "area": "chuugoku",
+          "name": "広島"
+        },
+        {
+          "id": "Fig705",
+          "area": "chuugoku",
+          "name": "山口"
+        },
+        {
+          "id": "Fig711",
+          "area": "shikoku",
+          "name": "徳島"
+        },
+        {
+          "id": "Fig712",
+          "area": "shikoku",
+          "name": "香川"
+        },
+        {
+          "id": "Fig713",
+          "area": "shikoku",
+          "name": "愛媛"
+        },
+        {
+          "id": "Fig714",
+          "area": "shikoku",
+          "name": "高知"
+        },
+        {
+          "id": "Fig801",
+          "area": "kyuusyuu",
+          "name": "福岡"
+        },
+        {
+          "id": "Fig805",
+          "area": "kyuusyuu",
+          "name": "佐賀"
+        },
+        {
+          "id": "Fig803",
+          "area": "kyuusyuu",
+          "name": "長崎"
+        },
+        {
+          "id": "Fig804",
+          "area": "kyuusyuu",
+          "name": "壱岐・対馬"
+        },
+        {
+          "id": "Fig806",
+          "area": "kyuusyuu",
+          "name": "熊本"
+        },
+        {
+          "id": "Fig802",
+          "area": "kyuusyuu",
+          "name": "大分"
+        },
+        {
+          "id": "Fig807",
+          "area": "kyuusyuu",
+          "name": "宮崎"
+        },
+        {
+          "id": "Fig808",
+          "area": "kyuusyuu",
+          "name": "鹿児島"
+        },
+        {
+          "id": "Fig809",
+          "area": "kyuusyuu",
+          "name": "大隅・トカラ"
+        },
+        {
+          "id": "Fig810",
+          "area": "kyuusyuu",
+          "name": "奄美"
+        },
+        {
+          "id": "Fig901",
+          "area": "okinawa",
+          "name": "沖縄本島"
+        },
+        {
+          "id": "Fig902",
+          "area": "okinawa",
+          "name": "大東島"
+        },
+        {
+          "id": "Fig903",
+          "area": "okinawa",
+          "name": "宮古島"
+        },
+        {
+          "id": "Fig904",
+          "area": "okinawa",
+          "name": "八重山"
+        }
+      ]
+    },
+    "page": "https://www.data.jma.go.jp/airinfo/data/awfo_low-level_sigwx.html",
+    "pageDetailed": "https://www.data.jma.go.jp/airinfo/data/awfo_low-level_detailed-sigwx.html",
+    "staleMin": 240
   }
 }
