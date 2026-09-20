@@ -3,7 +3,7 @@
    - 気象データ(一覧JSON・図・PDF)は「ネット優先、失敗したら前回分」。前回分には x-wx-offline: 1 を付けて返す
    - 地図タイル(時刻入りURLなので中身が変わらない)はキャッシュ優先
    ※ index.html 等を更新したら VER を上げる(index.html の VER_TAG・BUILD も一緒に) */
-const VER = 'wxbrf-p4-10';
+const VER = 'wxbrf-p3-1';
 const DATA_CACHE = 'wxbrf-data';
 const TILE_CACHE = 'wxbrf-tiles';
 const TILE_MAX = 3000;
@@ -22,6 +22,7 @@ const SHELL = [
   './lib/charts.js',
   './lib/verify.js',
   './lib/route.js',
+  './lib/signals.js',
   './icon-192.png',
   './icon-512.png',
   './icon-180.png',

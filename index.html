@@ -199,8 +199,9 @@ import { makeProfile, analyze, cloudBaseEspy, M_FT } from './lib/sounding.js';
 import { meteogram, crossSection, skewT } from './lib/charts.js';
 import { addObs, addSnapshot, pairs as vPairs, stats as vStats, correction as vCorrection, applyCorrection, LEAD_BUCKETS, VARS as V_VARS } from './lib/verify.js';
 import { splitRoute, passTimes, routeNM, routeMinutes, judgeRoute, judgePass, parseRouteCode, distNM } from './lib/route.js';
+import { signals, script } from './lib/signals.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p4-10', BUILD='2026-09-20';
+const VER_TAG='p3-1', BUILD='2026-09-20';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -271,7 +272,7 @@ const SCREENS=[
   {n:6,name:'鉛直構造'},
   {n:7,name:'明日の予想'},
   {n:8,name:'週間'},
-  {n:9,name:'まとめ',later:'フェーズ3'},
+  {n:9,name:'まとめ'},
 ];
 let SRCDEF=null;
 const loaded=new Set();
@@ -300,7 +301,7 @@ function toggleLearn(){
   syncLearnBtns();
   /* 学習モードの内容を埋め込んでいる画面は作り直す */
   const cur=SCREENS[curIdx].n;
-  const screens=[0,1,2,3,4,5,6,7,8];
+  const screens=[0,1,2,3,4,5,6,7,8,9];
   for(const n of screens) loaded.delete(n);
   for(const n of screens) if(n!==cur&&$(`#scr${n}`)) $(`#scr${n} .body`).innerHTML='';
   navLock=Date.now()+800;
@@ -333,7 +334,7 @@ function laterHtml(s){
   return `<div class="card"><h3>${s.name}<span class="sp"></span><span class="badge none">データなし</span></h3>
   <p class="note">この画面は${s.later}で作ります。${({
     5:'METAR/TAFの原文と日本語デコード、横風成分、ミニマ判定。国際配信されない飛行場のMETARは写真からテキスト認識でコピーして貼り付ける欄を設けます。',
-    9:'各画面の話すポイントをつないだ読み上げ用のブリーフィング台本。'})[s.n]}</p></div>`;
+    9:''})[s.n]||''}</p></div>`;
 }
 
 /* ───────── 学習モード ─────────
@@ -520,8 +521,9 @@ async function loadHome(){
     <p class="note">設定はこの端末の中だけに保存します。飛行場は空白区切りで入力し、画面5で判定します。</p>
   </div>
   <div class="card">
-    <h3>AI 3行要約<span class="sp"></span><span class="badge none">未実装</span></h3>
-    <p class="note">フェーズ3で、公式の解説文と判定結果をもとにした3行要約を表示します。AIによる参考解説で、予報官ブリーフィングを優先します。</p>
+    <h3>3行要約<span class="sp"></span><a href="#" data-go="9" class="note">まとめ画面へ</a></h3>
+    <div id="homeSum" class="note">「9 まとめ」を開くと、各画面の判定を突き合わせた要約を作ります。</div>
+    <p class="note">フェーズ3では、ここにAIが整えた文章を出します（AIによる参考解説。予報官ブリーフィングを優先）。</p>
   </div>
   <div class="card">
     <h3>各画面の判定</h3>
@@ -550,12 +552,12 @@ async function loadHome(){
   $('#btnReload').onclick=()=>{
     const keep=SCREENS[curIdx].n;
     for(const n of [...loaded]) if(n!==0) loaded.delete(n);
-    for(const n of [1,2,3,4,5,6,7,8]) $(`#scr${n} .body`).innerHTML='';
+    for(const n of [1,2,3,4,5,6,7,8,9]) $(`#scr${n} .body`).innerHTML='';
     NWP_CACHE.clear();
     MAPS.forEach(m=>m.remove());MAPS.length=0;SRC.clear();PDF_CACHE.clear();renderHomeStatus();
     if(keep!==0){loaded.delete(keep);activate(curIdx)}
   };
-  renderHomeStatus();
+  renderHomeStatus();renderHomeSummary();
   try{
     const {data}=await getJSON(SRCDEF.weekly.areaList);
     const sel=$('#cfgOffice'),cur=cfg.office||'130000';
@@ -584,6 +586,12 @@ function flightWindow(){
   if(!ret||isNaN(ret)||ret<dep) ret=new Date(dep.getTime()+2*3600e3);
   const b=+mn.beforeMin||0,a=+mn.afterMin||0;
   return {from:new Date(dep.getTime()-b*60e3),to:new Date(ret.getTime()+a*60e3),auto};
+}
+/* まとめ画面で作った要約を、ホームの3行要約にも出す */
+function renderHomeSummary(){
+  const el=$('#homeSum');if(!el)return;
+  if(!SUM.lines.length){el.textContent='「9 まとめ」を開くと、各画面の判定を突き合わせた要約を作ります。';return}
+  el.innerHTML=SUM.lines.slice(0,3).map(l=>`<div>${esc(l.text)}</div>`).join('')+`<div class="meta">作成 ${fJst(SUM.got)}</div>`;
 }
 function renderHomeStatus(){
   const el=$('#homeStatus');if(!el)return;
@@ -1508,7 +1516,7 @@ function drawVertical(){
   const topFt=+((mn.flightTopFt)||10000);
   /* 時刻ごとの推定値と判定 */
   const est={baseFt:[],ssi:[],cape:[]},judge=[];
-  VERT.est=est;
+  VERT.est=est;VERT.an=null;
   const an=d.times.map((t,i)=>{
     const prof=d.prof[i];
     const a=analyze(prof,{flightFt:[0,topFt],elevM:d.elevM});
@@ -1518,6 +1526,7 @@ function drawVertical(){
     judge.push(judgeNwp(cond,mn,{runways:rw}).level);
     return a;
   });
+  VERT.an=an;
   /* 予報の記録（オフラインの前回分は記録しない） */
   if(!d.offline) recordSnapshot(VERT.icao,d,est);
   /* 答え合わせでくせが分かっていれば、推定雲底に補正をかける */
@@ -1996,7 +2005,111 @@ async function renderPhotos(){
   }catch(e){el.innerHTML=`<span class="note">写真を読めませんでした：${esc(e.message)}</span>`}
 }
 
-const LOADERS={0:loadHome,1:loadSynoptic,2:loadRadarNow,3:loadRadarFcst,4:loadRoute,5:loadAirfields,6:loadVertical,7:loadTomorrow,8:loadWeekly};
+/* ═════════ 9 まとめ（総合解析とブリーフィング台本） ═════════ */
+/* 仕様書 第4章の「総合解析」のうち、コードで計算できる突き合わせ（lib/signals.js）を出し、
+   そこから読み上げ用の台本を組み立てる。AI解説（フェーズ3）は、この結果を文章にする役割 */
+const SUM={sigs:[],lines:[],got:null};
+
+/* 台本に必要な材料を集める。まだ開いていない画面のデータは、ここで取りに行く */
+async function gatherContext({fetchIfMissing=true}={}){
+  const win=flightWindow(),mn=store.get('wx.minima')||{},ids=adList();
+  /* 飛行場：METAR/TAF（画面5の仕組みをそのまま使う） */
+  if(fetchIfMissing&&!WXDATA.relay&&!loaded.has(5)){loaded.add(5);await loadAirfields().catch(()=>{})}
+  const airfields=ids.map(icao=>{
+    const {metar,taf}=pickSources(icao),rw=runwaysOf(icao);
+    const jm=metar?judgeMetar(metar.p,mn,{runways:rw}):null;
+    const jt=taf?judgeTaf(taf.p,mn,{runways:rw,from:win.from,to:win.to}):null;
+    return {icao,metar:jm?.level,taf:jt?.level,rule:jm?.flight?.rule,p:metar?.p,t:taf?.p};
+  });
+  /* 鉛直：画面6の数値予報（選んでいる飛行場、無ければ先頭） */
+  let nwp=null;
+  const vertAd=store.get('wx.vertAd')||ids[0];
+  if(fetchIfMissing&&vertAd&&(!VERT.data||VERT.icao!==vertAd)){
+    const pos=await nwpPos(vertAd);
+    if(pos){try{VERT.data=await fetchNwp2(pos.lat,pos.lon);VERT.icao=vertAd;computeVertEst()}catch(e){}}
+  }
+  if(VERT.data){
+    if(!VERT.est||!VERT.an) computeVertEst();
+    nwp={times:VERT.data.times,sfc:VERT.data.sfc,est:VERT.est,an:VERT.an};
+  }
+  return {win,mn,airfields,nwp,route:RTE.rows?.length?RTE:null,vertAd};
+}
+/* 画面6を開いていなくても、推定雲底・安定度・解析値を作れるようにする */
+function computeVertEst(){
+  const d=VERT.data;if(!d)return;
+  const mn=store.get('wx.minima')||{},topFt=+((mn.flightTopFt)||10000);
+  const est={baseFt:[],ssi:[],cape:[]},an=[];
+  d.times.forEach((t,i)=>{
+    const prof=d.prof[i],a=analyze(prof,{flightFt:[0,topFt],elevM:d.elevM});
+    an.push(a);
+    est.baseFt.push(estBaseFt(prof,d.elevM,d.sfc.t[i],d.sfc.td[i]));
+    est.ssi.push(a?.ssi??null);est.cape.push(a?.cape??null);
+  });
+  const corr=ceilCorrection(VERT.icao);
+  if(corr!=null) est.baseFt=est.baseFt.map(v=>applyCorrection(v,corr));
+  VERT.est=est;VERT.an=an;
+}
+
+async function loadSummary(){
+  const b=$('#scr9 .body');
+  b.innerHTML=`
+  <div class="card"><h3>まとめ<span class="sp"></span><button id="sumGo">情報を集めて作る</button></h3>
+    <p class="note">各画面の判定と数値予報を突き合わせて、注意点と読み上げ用の台本を作ります。AIは使っていません（フェーズ3でAIが文章を整えます）。</p>
+    <div id="sumStatus" class="meta"></div>
+  </div>
+  <div class="card" id="sumSig"></div>
+  <div class="card" id="sumScript"></div>
+  <div class="card"><h3>AI解説<span class="sp"></span><span class="badge none">未実装</span></h3>
+    <p class="note">フェーズ3で、この結果と公式の解説文をAIに渡して、話しやすい文章に整えます。AIに送るのは公開気象データと判定結果だけで、飛行場名・経路・基地名は送りません。</p></div>`;
+  $('#sumGo').onclick=()=>buildSummary(true);
+  buildSummary(false);
+}
+async function buildSummary(force){
+  const st=$('#sumStatus');if(!st)return;
+  st.textContent='集めています…';
+  try{
+    const ctx=await gatherContext({fetchIfMissing:force||!SUM.got});
+    const first=ctx.airfields[0];
+    SUM.sigs=signals({nwp:ctx.nwp,metar:first?.p,taf:first?.t,route:ctx.route,window:ctx.win,minima:ctx.mn});
+    SUM.lines=script({sigs:SUM.sigs,judges:{total:worst(JUDGE_ROWS.filter(r=>!r.none).map(r=>JUDGE.get(r.n)?.level||'none'))},
+      window:ctx.win,airfields:ctx.airfields,route:ctx.route});
+    SUM.got=new Date();
+    renderHomeSummary();
+    st.innerHTML=`作成 ${fJst(SUM.got)} ・ 対象 ${fJst(ctx.win.from)}〜${fJst(ctx.win.to)} JST`
+      +`<br>材料：${ctx.nwp?`数値予報（${esc(ctx.vertAd||'')}）`:'数値予報なし'} ／ ${ctx.airfields.length?`飛行場 ${ctx.airfields.map(a=>a.icao).join('・')}`:'飛行場なし'} ／ ${ctx.route?`経路 ${ctx.route.rows.length}区間`:'経路なし'}`;
+    renderSignals();renderScript();
+  }catch(e){st.innerHTML=`<span class="stale">作れませんでした：${esc(e.message)}</span>`}
+}
+function renderSignals(){
+  const el=$('#sumSig');if(!el)return;
+  const lvl={alert:'nogo',caution:'caution',info:'go'};
+  el.innerHTML=`<h3>総合解析（資料の突き合わせ）<span class="sp"></span><span class="note">根拠の数が多いほど確か</span></h3>
+    ${SUM.sigs.length?SUM.sigs.map(s=>`<div style="margin:10px 0">
+      <div><span class="lvl ${lvl[s.level]}"></span><b>${esc(s.title)}</b>${s.ask?' <span class="badge caution">予報官に確認</span>':''} <span class="note">根拠 ${s.basis.length}件</span></div>
+      <div class="note" style="margin:2px 0 4px">${esc(s.text)}</div>
+      <table class="t">${s.basis.map(x=>`<tr><td>${esc(x.what)}</td><td style="text-align:right;width:5em"><a href="#" data-go="${x.screen}">画面${x.screen}</a></td></tr>`).join('')}</table>
+    </div>`).join(''):'<p class="note">突き合わせで出たシグナルはありません（材料が足りないか、目立った変化がありません）。</p>'}`;
+  el.querySelectorAll('[data-go]').forEach(a=>a.onclick=e=>{e.preventDefault();goTo(SCREENS.findIndex(s=>s.n===+a.dataset.go))});
+}
+function renderScript(){
+  const el=$('#sumScript');if(!el)return;
+  const text=SUM.lines.map(l=>l.text).join('\n');
+  el.innerHTML=`<h3>ブリーフィング台本<span class="sp"></span><button id="sumCopy">コピー</button><button id="sumSpeak">読み上げ</button></h3>
+    <table class="t">${SUM.lines.map(l=>`<tr><td class="m" style="width:3.5em"><a href="#" data-go="${l.screen}">画面${l.screen}</a></td><td>${esc(l.text)}</td></tr>`).join('')}</table>
+    <p class="note">この台本はアプリが計算した判定から作った下書きです。読み上げながら、各画面の図で確かめてください。</p>`;
+  el.querySelectorAll('[data-go]').forEach(a=>a.onclick=e=>{e.preventDefault();goTo(SCREENS.findIndex(s=>s.n===+a.dataset.go))});
+  $('#sumCopy').onclick=async()=>{try{await navigator.clipboard.writeText(text);$('#sumCopy').textContent='コピーしました'}catch(e){$('#sumCopy').textContent='コピーできません'}};
+  $('#sumSpeak').onclick=()=>{
+    if(!('speechSynthesis' in window)){alert('この端末では読み上げできません');return}
+    const sp=window.speechSynthesis;
+    if(sp.speaking){sp.cancel();$('#sumSpeak').textContent='読み上げ';return}
+    const u=new SpeechSynthesisUtterance(text);u.lang='ja-JP';u.rate=1.0;
+    u.onend=()=>{$('#sumSpeak').textContent='読み上げ'};
+    sp.speak(u);$('#sumSpeak').textContent='停止';
+  };
+}
+
+const LOADERS={0:loadHome,1:loadSynoptic,2:loadRadarNow,3:loadRadarFcst,4:loadRoute,5:loadAirfields,6:loadVertical,7:loadTomorrow,8:loadWeekly,9:loadSummary};
 
 /* ───────── 時計・通信状態 ───────── */
 function tick(){
