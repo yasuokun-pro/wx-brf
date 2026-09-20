@@ -1,7 +1,7 @@
 /* node --test tests/ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { distNM, bearing, splitRoute, passTimes, routeNM, judgeSegment, judgeRoute, parseRouteCode } from '../lib/route.js';
+import { distNM, bearing, splitRoute, passTimes, routeNM, judgeSegment, judgeRoute, judgePass, parseRouteCode } from '../lib/route.js';
 
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg || ''} ${a} ≒ ${b} (±${tol})`);
 const RJTT = { lat: 35.5497, lng: 139.787, name: 'RJTT' };
@@ -110,4 +110,26 @@ test('ナビPWAの共有コードとJSONを取り込む', () => {
   assert.equal(parseRouteCode(multi, { atob: atobFn }).length, 3);
   assert.throws(() => parseRouteCode('ただの文字', { atob: atobFn }));
   assert.throws(() => parseRouteCode('', { atob: atobFn }));
+});
+
+test('峠の判定：雲底が峠＋必要な間隔より上か', () => {
+  const M = { clearanceFt: 500, marginFt: 500, windKt: 25, precipMmh: 1 };
+  const pass = { elevM: 1000 };            /* 標高 3281ft の峠 */
+  const it = (r, k) => r.items.find(i => i.key === k);
+  /* 雲底 2000ft AGL → 5281ft MSL、必要 3781ft → 余裕 1500ft → GO */
+  assert.equal(it(judgePass({ ...pass, baseFt: 2000 }, M), 'pass').level, 'go');
+  /* 余裕 300ft → 注意 */
+  assert.equal(it(judgePass({ ...pass, baseFt: 800 }, M), 'pass').level, 'caution');
+  /* 雲底が峠＋間隔より下 → NO-GO */
+  assert.equal(it(judgePass({ ...pass, baseFt: 300 }, M), 'pass').level, 'nogo');
+  assert.match(it(judgePass({ ...pass, baseFt: 300 }, M), 'pass').why, /足りない/);
+  /* 雲底が推定できなければ灰 */
+  assert.equal(judgePass({ ...pass }, M).level, 'none');
+  /* 風と降水も見る。視程は判定に入れない（カメラで確認） */
+  assert.equal(it(judgePass({ ...pass, baseFt: 2000, windKt: 30 }, M), 'wind').level, 'caution');
+  assert.equal(judgePass({ ...pass, baseFt: 2000, windKt: 40 }, M).level, 'nogo');
+  const r = judgePass({ ...pass, baseFt: 2000, windKt: 5, precipMmh: 0 }, M);
+  assert.equal(r.level, 'go');
+  assert.equal(it(r, 'vis').level, 'none');
+  assert.equal(r.elevFt, 3281);
 });

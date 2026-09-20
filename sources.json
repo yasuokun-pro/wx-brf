@@ -801,5 +801,14 @@
     "page": "https://www.data.jma.go.jp/airinfo/data/awfo_low-level_sigwx.html",
     "pageDetailed": "https://www.data.jma.go.jp/airinfo/data/awfo_low-level_detailed-sigwx.html",
     "staleMin": 240
+  },
+  "elevation": {
+    "_note": "標高API（1mレーザー測量等）。峠の標高に使う。CORS可",
+    "url": "https://cyberjapandata2.gsi.go.jp/general/dem/scripts/getelevation.php",
+    "page": "https://maps.gsi.go.jp/development/elevation_s.html"
+  },
+  "cameras": {
+    "_note": "ライブカメラは利用者が自分で登録する（URLは端末内のみ）。画像の直リンクは <img> で表示し、ページだけのものはリンクで開く。提供元の規約に従い、自分が見る用途だけに使う（再配信しない）",
+    "help": "https://www.mlit.go.jp/road/bosai/LIVEcamera.html"
   }
 }

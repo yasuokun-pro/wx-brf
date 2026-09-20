@@ -186,9 +186,9 @@ import { judgeMetar, judgeTaf, judgeNwp, worst, LEVEL_JA, FR_RANK } from './lib/
 import { makeProfile, analyze, cloudBaseEspy, M_FT } from './lib/sounding.js';
 import { meteogram, crossSection, skewT } from './lib/charts.js';
 import { addObs, addSnapshot, pairs as vPairs, stats as vStats, correction as vCorrection, applyCorrection, LEAD_BUCKETS, VARS as V_VARS } from './lib/verify.js';
-import { splitRoute, passTimes, routeNM, routeMinutes, judgeRoute, parseRouteCode } from './lib/route.js';
+import { splitRoute, passTimes, routeNM, routeMinutes, judgeRoute, judgePass, parseRouteCode, distNM } from './lib/route.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p4-5', BUILD='2026-09-20';
+const VER_TAG='p4-6', BUILD='2026-09-20';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -1550,6 +1550,7 @@ const RTE_FIELDS=[
   ['gsKt','対地速度(kt)','100'],['altFt','飛行高度(ft MSL)','2000'],['segNM','区間の長さ(NM)','10'],
   ['clearanceFt','雲底との間隔(ft)','500'],['terrainClearFt','地形との間隔(ft)','500'],
   ['precipMmh','降水の注意(mm/h)','1'],['windKt','風の注意(kt)','25'],['mountainFt','山岳とみなす標高(ft)','3000'],
+  ['passClearFt','峠との間隔(ft)','500'],['passMarginFt','峠の余裕幅(ft)','500'],
 ];
 const rteCfg=()=>{
   const o=store.get('wx.rte')||{};
@@ -1583,6 +1584,7 @@ async function loadRoute(){
       <div class="row"><button id="rteSave">保存して判定し直す</button><span class="note">出発時刻はホームの出発予定を使います</span></div>
     </details>
   </div>
+  <div class="card" id="rtePass"></div>
   <div class="card" id="rteResult"><p class="note">点を2つ以上置いて「判定する」を押すと、区間ごとに数値予報を取って判定します。</p></div>
   <div class="card">
     <h3>下層悪天予想図（詳細版）<span class="sp"></span>
@@ -1656,6 +1658,8 @@ async function loadRoute(){
     await photoAdd(f);e.target.value='';renderPhotos();
   };
   renderPhotos();
+  renderPasses();
+  if(passPoints().length) fetchPassWx().then(renderPasses).catch(()=>{});
   if(routeWps().length>=2) runRoute();
 }
 
@@ -1671,6 +1675,12 @@ function drawRouteEdit(){
     m.on('click',()=>{const a=routeWps();a.splice(i,1);setRouteWps(a);drawRouteEdit()});
     layers.push(m);
   });
+  /* 気象変換点（峠）も地図に出す */
+  for(const pt of passPoints()){
+    const mk=L.circleMarker([pt.lat,pt.lng],{radius:7,color:'#ffb02e',weight:2,fillColor:'#ffb02e',fillOpacity:.5}).addTo(RTEMAP);
+    mk.bindTooltip(`${pt.name}${pt.elevM==null?'':` ${Math.round(pt.elevM*M_FT)}ft`}`,{permanent:false});
+    layers.push(mk);
+  }
   RTEMAP._rte=layers;
   const segs=splitRoute(wps,{maxNM:rteCfg().segNM});
   const el=$('#rteInfo');
@@ -1700,6 +1710,7 @@ async function runRoute(){
     setStatus('rte',{pub:r.got,got:r.got,offline:r.offline});
     renderRoute(r);
     drawRouteJudged();
+    if(passPoints().length){await fetchPassWx().catch(()=>{});renderPasses()}
   }catch(e){box.innerHTML=errBox(e.message,SRCDEF.nwp.page);setStatus('rte',{err:e.message})}
 }
 /* 1地点ぶんの予報から、その時刻の値を取り出す */
@@ -1758,6 +1769,117 @@ function drawRouteJudged(){
   RTEMAP._rteJ?.forEach(l=>RTEMAP.removeLayer(l));
   const col={go:'#38e07b',caution:'#ffb02e',nogo:'#ff5c5c',none:'#7d93a8'};
   RTEMAP._rteJ=RTE.rows.map(s=>L.polyline([[s.from.lat,s.from.lng],[s.to.lat,s.to.lng]],{color:col[s.level]||col.none,weight:6,opacity:.85}).addTo(RTEMAP));
+}
+
+/* ───────── 気象変換点（峠）とライブカメラ ─────────
+   峠は「雲底が峠の標高＋必要な間隔より上か」で通過の目安を出す。視程は数値予報に無いので、
+   登録したライブカメラの画像を並べて目で見る。点もカメラのURLも端末内だけに保存する。
+   ⚠ カメラ画像は提供元の規約に従って自分が見るだけに使う（再配信しない）。
+   ⚠ 画像は <img> で直接表示する（他所のサイトは fetch だと読めないことが多いため）。撮影時刻は画像の中の文字で見る */
+const passPoints=()=>store.get('wx.points')||[];
+const setPassPoints=p=>store.set('wx.points',p);
+const passCfg=()=>{const c=rteCfg(),o=store.get('wx.rte')||{};
+  return {clearanceFt:Number.isFinite(+o.passClearFt)&&o.passClearFt!==''?+o.passClearFt:c.terrainClearFt,
+    marginFt:Number.isFinite(+o.passMarginFt)&&o.passMarginFt!==''?+o.passMarginFt:500,
+    windKt:c.windKt,precipMmh:c.precipMmh}};
+let PASSWX=null;
+
+/* 地理院の標高API（1mレーザー測量。海上などは null が返る） */
+async function gsiElev(lat,lng){
+  try{
+    const r=await getJSON(`${SRCDEF.elevation.url}?lon=${lng.toFixed(6)}&lat=${lat.toFixed(6)}&outtype=JSON`);
+    const v=+r.data.elevation;
+    return Number.isFinite(v)?v:null;
+  }catch(e){return null}
+}
+async function addPassPoint(name,lat,lng){
+  const elevM=await gsiElev(lat,lng);
+  const p={id:Date.now(),name:name||`地点${passPoints().length+1}`,lat:+lat.toFixed(5),lng:+lng.toFixed(5),elevM,cams:[]};
+  setPassPoints([...passPoints(),p]);
+  return p;
+}
+/* 峠ごとの数値予報（まとめて1回で取る）。経路があれば、その峠に一番近い区間の通過時刻を使う */
+async function fetchPassWx(){
+  const pts=passPoints();
+  if(!pts.length){PASSWX=null;return}
+  /* 標高が入っていない点は地理院の標高を取って覚える */
+  let changed=false;
+  for(const p of pts) if(p.elevM==null){const e=await gsiElev(p.lat,p.lng);if(e!=null){p.elevM=e;changed=true}}
+  if(changed) setPassPoints(pts);
+  const N=SRCDEF.nwp,cfg=rteCfg();
+  const vars=[...N.surface];
+  for(const p of NWP_LEVELS) for(const v of N.levelVars) vars.push(`${v}_${p}hPa`);
+  const url=`${N.url}?latitude=${pts.map(p=>p.lat).join(',')}&longitude=${pts.map(p=>p.lng).join(',')}&hourly=${vars.join(',')}&forecast_days=3&wind_speed_unit=kn&timezone=UTC`;
+  const r=await getJSON(url);
+  const list=Array.isArray(r.data)?r.data:[r.data];
+  const w=flightWindow();
+  PASSWX={got:r.got,offline:r.offline,rows:pts.map((p,i)=>{
+    /* 通過時刻：経路があれば一番近い区間の時刻、無ければ判定の時間帯の頭 */
+    let t=w.from,near=null;
+    if(RTE.rows?.length){
+      for(const s of RTE.rows){const d=distNM({lat:p.lat,lng:p.lng},s.mid);if(!near||d<near.d)near={d,s}}
+      if(near&&near.d<=15) t=near.s.tMid;
+    }
+    const smp=sampleAt(list[i],t,{...cfg,altFt:Math.round((p.elevM??0)*M_FT)+passCfg().clearanceFt});
+    /* 峠そのものの標高は地理院の値を使う（数値予報の地形は粗い） */
+    return {p,t,nearNM:near?Math.round(near.d*10)/10:null,wx:{...smp,elevM:p.elevM??smp.elevM}};
+  })};
+}
+function renderPasses(){
+  const el=$('#rtePass');if(!el)return;
+  const pts=passPoints(),m=passCfg();
+  el.innerHTML=`
+    <h3>気象変換点（峠）とライブカメラ<span class="sp"></span><button id="ptAdd">地図の中心を追加</button><button id="ptWx">予報を取り直す</button></h3>
+    <p class="note">峠は「推定雲底が 峠の標高＋間隔（${m.clearanceFt}ft）より上か」で目安を出します。<b>視程は数値予報に無いので判定しません</b>。登録したカメラで実際の見え方を確かめてください。点とカメラのURLは端末内だけに保存します。</p>
+    ${pts.length?'':'<p class="note">まだ登録がありません。地図を峠に合わせて「地図の中心を追加」を押すと、地理院の標高を自動で取り込みます。</p>'}
+    <div id="ptList"></div>`;
+  $('#ptAdd').onclick=async()=>{
+    if(!RTEMAP)return;
+    const c=RTEMAP.getCenter();
+    const name=prompt('気象変換点の名前（例：雁坂峠）','');
+    if(name===null)return;
+    const p=await addPassPoint(name,c.lat,c.lng);
+    await fetchPassWx().catch(()=>{});renderPasses();drawRouteEdit();
+    if(p.elevM==null) alert('標高を取れませんでした。海上か、地理院のデータが無い場所かもしれません');
+  };
+  $('#ptWx').onclick=async()=>{$('#ptList').innerHTML='<div class="loading">取得中…</div>';await fetchPassWx().catch(e=>alert(e.message));renderPasses()};
+  const list=$('#ptList');
+  list.innerHTML=pts.map((p,i)=>{
+    const row=PASSWX?.rows?.find(r=>r.p.id===p.id);
+    const j=row?judgePass(row.wx,m):null;
+    return `<div class="card" style="margin:8px 0">
+      <h3>${esc(p.name)}<span class="note"> ${p.elevM==null?'標高不明':`標高 ${Math.round(p.elevM*M_FT)}ft（${Math.round(p.elevM)}m）`}</span><span class="sp"></span>${j?badge(j.level):'<span class="badge none">未取得</span>'}</h3>
+      ${row?`<div class="meta">${fBoth(row.t)}${row.nearNM!=null?` ・経路から ${row.nearNM}NM`:''}</div>`:''}
+      ${j?`<table class="t">${j.items.map(x=>`<tr><td style="width:6.5em"><span class="lvl ${x.level}"></span>${esc(x.label)}</td><td class="m">${esc(x.value)}${x.why?`<div class="why">${esc(x.why)}</div>`:''}</td></tr>`).join('')}</table>`:''}
+      <div class="wsGrid" style="margin-top:8px">${(p.cams||[]).map((c,k)=>`
+        <div class="wsT" style="border-color:var(--line)"><div class="im"><img data-cam="${p.id}_${k}" src="${esc(c.url)}${c.url.includes('?')?'&':'?'}_=${Date.now()}" alt="${esc(c.label||'カメラ')}"></div>
+        <span>${esc(c.label||`カメラ${k+1}`)}<i class="src" style="font-style:normal">${c.page?'元ページあり':'タップで拡大'}</i></span></div>`).join('')||'<span class="note">カメラ未登録</span>'}</div>
+      <div class="row"><button data-cadd="${p.id}">カメラを追加</button><button data-cref="${p.id}">画像を更新</button><button data-pdel="${p.id}">この地点を消す</button></div>
+    </div>`;
+  }).join('');
+  /* カメラ画像：タップで拡大、長押し(右クリック)で削除、元ページはボタンから */
+  list.querySelectorAll('[data-cam]').forEach(img=>{
+    const [pid,k]=img.dataset.cam.split('_');
+    const p=pts.find(x=>String(x.id)===pid),c=p?.cams[+k];
+    img.onclick=()=>{if(c.page)window.open(c.page,'_blank','noopener');else openViewer(img.src,`${p.name} ${c.label||''}`)};
+    img.oncontextmenu=e=>{e.preventDefault();if(confirm(`${c.label||'カメラ'} を消しますか`)){p.cams.splice(+k,1);setPassPoints(pts);renderPasses()}};
+    img.onerror=()=>{img.parentElement.innerHTML=`<span class="note" style="padding:6px">画像を表示できません${c.page?'（元ページを開いてください）':'（URLが画像の直リンクか確認）'}</span>`};
+  });
+  list.querySelectorAll('[data-cadd]').forEach(b=>b.onclick=()=>{
+    const p=pts.find(x=>String(x.id)===b.dataset.cadd);
+    const url=prompt('ライブカメラの画像URL（.jpg など直リンク）。ページのURLしか無い場合はそのまま貼ってください','');
+    if(!url)return;
+    const label=prompt('名前（例：国道140号 雁坂トンネル）','')||'';
+    const isImg=/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(url);
+    p.cams=[...(p.cams||[]),isImg?{label,url}:{label,url,page:url}];
+    setPassPoints(pts);renderPasses();
+  });
+  list.querySelectorAll('[data-cref]').forEach(b=>b.onclick=()=>renderPasses());
+  list.querySelectorAll('[data-pdel]').forEach(b=>b.onclick=()=>{
+    const p=pts.find(x=>String(x.id)===b.dataset.pdel);
+    if(!confirm(`${p.name} を消しますか`))return;
+    setPassPoints(pts.filter(x=>x.id!==p.id));renderPasses();drawRouteEdit();
+  });
 }
 
 /* ───────── 予報官の経路予報の写真（端末内だけ・IndexedDB） ───────── */
