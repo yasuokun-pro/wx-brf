@@ -200,8 +200,9 @@ import { meteogram, crossSection, skewT } from './lib/charts.js';
 import { addObs, addSnapshot, pairs as vPairs, stats as vStats, correction as vCorrection, applyCorrection, LEAD_BUCKETS, VARS as V_VARS } from './lib/verify.js';
 import { splitRoute, passTimes, routeNM, routeMinutes, judgeRoute, judgePass, parseRouteCode, distNM } from './lib/route.js';
 import { signals, script } from './lib/signals.js';
+import { buildPrompt, parseAiJson, cacheKey } from './lib/ai.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p3-1', BUILD='2026-09-20';
+const VER_TAG='p3-2', BUILD='2026-09-21';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -325,7 +326,8 @@ function activate(i){
   $('#prev').disabled=i===0;$('#next').disabled=i===SCREENS.length-1;
   const nx=SCREENS[i+1];$('#navMid').textContent=nx?`次：${nx.n} ${nx.name}`:'最後の画面';
   const s=SCREENS[i];
-  if(!loaded.has(s.n)&&LOADERS[s.n]){loaded.add(s.n);LOADERS[s.n]().catch(e=>console.error(e))}
+  if(!loaded.has(s.n)&&LOADERS[s.n]){loaded.add(s.n);LOADERS[s.n]().then(()=>bindGoLinks($(`#scr${s.n}`))).catch(e=>console.error(e))}
+  bindGoLinks($(`#scr${s.n}`));
   /* 作り直しで消えた地図は外す（invalidateSizeでエラーになるため） */
   for(let k=MAPS.length-1;k>=0;k--) if(!document.body.contains(MAPS[k].getContainer())) MAPS.splice(k,1);
   setTimeout(()=>MAPS.forEach(m=>{try{m.invalidateSize()}catch(e){}}),350);
@@ -335,6 +337,27 @@ function laterHtml(s){
   <p class="note">この画面は${s.later}で作ります。${({
     5:'METAR/TAFの原文と日本語デコード、横風成分、ミニマ判定。国際配信されない飛行場のMETARは写真からテキスト認識でコピーして貼り付ける欄を設けます。',
     9:''})[s.n]||''}</p></div>`;
+}
+
+/* ───────── AI解説 ─────────
+   つなぎ方は2通り。①手貼り（プロンプトをコピー → Claude等に貼る → 返事を貼り戻す。無料）
+   ②中継経由のAPI（公開後・フェーズ3）。どちらも同じJSONを画面に出す */
+const aiGet=()=>store.get('wx.ai')||null;
+function talkHtml(n){
+  const ai=aiGet();
+  const sec=(ai?.data?.sections||[]).filter(s=>s.screen===n);
+  if(!sec.length) return `<div class="talk">話すポイント（AI解説）：<a href="#" data-go="9">画面9でAI解説を作る</a>と、ここに出ます。</div>`;
+  const conf={high:'確度 高',mid:'確度 中',low:'確度 低'};
+  return `<div class="talk"><b>話すポイント（AI解説）</b>
+    ${sec.map(x=>`<div style="margin-top:4px">${esc(x.talk)}<div class="note">根拠：${x.basis.map(esc).join(' ／ ')||'（なし）'} ・ ${conf[x.confidence]||''}</div></div>`).join('')}
+    <div class="note" style="margin-top:4px">AIによる参考解説。予報官ブリーフィングを優先。作成 ${ai.at?fJst(new Date(ai.at)):''}${ai.stale?'<span class="stale"> ・資料が更新されています</span>':''}</div></div>`;
+}
+/* 画面の中の data-go リンク（AI解説・シグナル）で画面を移動する */
+function bindGoLinks(root){
+  (root||document).querySelectorAll('[data-go]').forEach(a=>{
+    if(a.dataset.bound)return;a.dataset.bound=1;
+    a.onclick=e=>{e.preventDefault();goTo(SCREENS.findIndex(s=>s.n===+a.dataset.go))};
+  });
 }
 
 /* ───────── 学習モード ─────────
@@ -590,8 +613,14 @@ function flightWindow(){
 /* まとめ画面で作った要約を、ホームの3行要約にも出す */
 function renderHomeSummary(){
   const el=$('#homeSum');if(!el)return;
+  const ai=aiGet();
+  if(ai?.data?.summary3?.length){
+    el.innerHTML=ai.data.summary3.map(t=>`<div>${esc(t)}</div>`).join('')
+      +`<div class="meta">AI解説 ${fJst(new Date(ai.at))}${ai.stale?'<span class="stale"> ・資料が更新されています</span>':''}</div>`;
+    return;
+  }
   if(!SUM.lines.length){el.textContent='「9 まとめ」を開くと、各画面の判定を突き合わせた要約を作ります。';return}
-  el.innerHTML=SUM.lines.slice(0,3).map(l=>`<div>${esc(l.text)}</div>`).join('')+`<div class="meta">作成 ${fJst(SUM.got)}</div>`;
+  el.innerHTML=SUM.lines.slice(0,3).map(l=>`<div>${esc(l.text)}</div>`).join('')+`<div class="meta">作成 ${fJst(SUM.got)}（アプリの計算）</div>`;
 }
 function renderHomeStatus(){
   const el=$('#homeStatus');if(!el)return;
@@ -606,7 +635,7 @@ async function loadSynoptic(){
   const b=$('#scr1 .body');
   const charts=SRCDEF.nwpPdf.analysis;
   b.innerHTML=`
-  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${talkHtml(1)}
   <div class="card">
     <h3>地上天気図（実況）</h3>
     ${metaEl('wm')}
@@ -804,7 +833,7 @@ function routeOverlay(map){
 async function loadRadarNow(){
   const b=$('#scr2 .body'),N=SRCDEF.nowcast;
   b.innerHTML=`
-  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${talkHtml(2)}
   ${learnBox(`<h4>レーダー実況の見どころ</h4>
     <table class="t">
       <tr><td style="width:7em">動きを見る</td><td>スライダーを前後に動かして、エコーがどちらへ・どれくらいの速さで動いているかを見る。1時間先の位置は、その動きの延長で見当がつく。</td></tr>
@@ -862,7 +891,7 @@ async function loadRadarNow(){
 async function loadRadarFcst(){
   const b=$('#scr3 .body'),N=SRCDEF.nowcast,R=SRCDEF.rasrf;
   b.innerHTML=`
-  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${talkHtml(3)}
   ${learnBox(`<h4>レーダー予想の見どころ</h4>
     <table class="t">
       <tr><td style="width:7em">1時間先まで</td><td>ナウキャスト。今のエコーを動かした予想なので、<b>発生と消滅は苦手</b>。動きの速い雨には強い。</td></tr>
@@ -948,7 +977,7 @@ const WD=['日','月','火','水','木','金','土'];
 async function loadTomorrow(){
   const b=$('#scr7 .body'),P=SRCDEF.nwpPdf;
   b.innerHTML=`
-  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${talkHtml(7)}
   ${learnBox(`<h4>予想図の見どころ</h4>
     <table class="t">
       <tr><td style="width:7em">地上</td><td>低気圧・前線の位置が12時間でどれだけ進むか。等圧線の間隔が狭まる時間帯＝風が強まる。</td></tr>
@@ -1057,7 +1086,7 @@ async function loadWeekly(){
   const b=$('#scr8 .body'),W=SRCDEF.weekly,P=SRCDEF.nwpPdf;
   const office=(store.get('wx.cfg')||{}).office||'130000';
   b.innerHTML=`
-  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${talkHtml(8)}
   <div class="card">
     <h3>${esc(P.weeklySfc.name)}</h3>
     ${metaEl('wsfc')}
@@ -1149,7 +1178,7 @@ async function loadAirfields(){
   const b=$('#scr5 .body'),ids=adList(),mn=store.get('wx.minima')||{},R=tfcRelay();
   const w=flightWindow();
   b.innerHTML=`
-  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${talkHtml(5)}
   <div class="card">
     <h3>飛行場の判定<span class="sp"></span><span id="adTotal"></span><button id="adReload">取り直す</button></h3>
     <p class="note">判定する時間帯：${fJst(w.from)} 〜 ${fJst(w.to)} JST（${w.auto?'出発予定が未入力のため今から3時間。':''}ホームで変更）。METARは今の観測なので、時間帯が今から3時間以内に始まるときだけ総合に入れます。</p>
@@ -1438,7 +1467,7 @@ async function loadVertical(){
   const b=$('#scr6 .body'),ids=adList();
   const cur=store.get('wx.vertAd')||ids[0]||'';
   b.innerHTML=`
-  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${talkHtml(6)}
   <div class="card">
     <h3>飛行場<span class="sp"></span><span id="vTabs" class="seg">${[['meteo','メテオグラム'],['xs','断面図'],['skew','Skew-T']].map(([k,l])=>`<button data-t="${k}" class="${(store.get('wx.vertTab')||'meteo')===k?'on':''}">${l}</button>`).join('')}</span></h3>
     <div class="row" id="vAdRow">${ids.length?ids.map(i=>`<button data-ad="${i}" class="${i===cur?'on':''}">${i}</button>`).join(''):'<span class="note">ホーム画面で飛行場を入れてください</span>'}</div>
@@ -1643,7 +1672,7 @@ async function loadRoute(){
   const figArea=store.get('wx.sigwxArea')||'kantouKoushin';
   const fig=store.get('wx.sigwxFig')||(S.detailed.figs.find(f=>f.area===figArea)||S.detailed.figs[0]).id;
   b.innerHTML=`
-  <div class="talk">話すポイント（AI解説）はフェーズ3で表示します。</div>
+  ${talkHtml(4)}
   ${learnBox(`<h4>経路判定の見どころ</h4>
     <table class="t">
       <tr><td style="width:7em">雲底</td><td>表示はMSL（推定雲底＋その場所の地形標高）。飛行高度との差がマイナスなら雲の中。</td></tr>
@@ -2005,10 +2034,65 @@ async function renderPhotos(){
   }catch(e){el.innerHTML=`<span class="note">写真を読めませんでした：${esc(e.message)}</span>`}
 }
 
+/* AI解説カード（手貼り方式。公開後は中継経由のAPIに差し替え） */
+let AIPROMPT=null;
+function renderAi(){
+  const el=$('#sumAi');if(!el)return;
+  const ai=aiGet(),anon=store.get('wx.aiAnon')!==false;
+  el.innerHTML=`
+    <h3>AI解説<span class="sp"></span>${ai?`<span class="note">${fJst(new Date(ai.at))}作成</span>`:'<span class="badge none">未作成</span>'}</h3>
+    <p class="note">いまは<b>手貼り</b>で動きます（無料）。「プロンプトをコピー」→ Claude などに貼る → 返ってきたJSONを下に貼り戻すと、各画面の「話すポイント」とホームの3行要約に出ます。公開後は中継経由で自動にします（月500円の上限つき）。</p>
+    <div class="row"><button id="aiCopy">プロンプトをコピー</button>
+      <label class="chk"><input type="checkbox" id="aiAnon" ${anon?'checked':''}>飛行場・地点名を伏せて送る</label>
+      <span id="aiMsg" class="note"></span></div>
+    <details><summary>送る内容を見る（外部に出るのはこれだけ）</summary><div class="raw" id="aiPreview" style="max-height:220px;overflow:auto;white-space:pre-wrap"></div></details>
+    <textarea id="aiPaste" placeholder='AIの返事（JSON）をここに貼る'></textarea>
+    <div class="row"><button id="aiApply">取り込む</button>${ai?'<button id="aiClear">消す</button>':''}<span id="aiMsg2" class="note"></span></div>
+    ${ai?aiSummaryHtml(ai):''}`;
+  const build=()=>{
+    const ctx=AICTX||{};
+    AIPROMPT=buildPrompt({...ctx,anonymize:store.get('wx.aiAnon')!==false,learn:learnOn()});
+    $('#aiPreview').textContent=AIPROMPT.text;
+    return AIPROMPT;
+  };
+  build();
+  $('#aiAnon').onchange=e=>{store.set('wx.aiAnon',e.target.checked);build();$('#aiMsg').textContent=e.target.checked?'伏せて送ります':'そのまま送ります'};
+  $('#aiCopy').onclick=async()=>{
+    const p=build();
+    try{await navigator.clipboard.writeText(p.text);$('#aiMsg').textContent=`コピーしました（${p.text.length}文字）`}
+    catch(e){$('#aiMsg').textContent='コピーできません。「送る内容を見る」から手で選んでください'}
+  };
+  $('#aiApply').onclick=()=>{
+    const r=parseAiJson($('#aiPaste').value,{map:AIPROMPT?.map});
+    if(!r.ok){$('#aiMsg2').innerHTML=`<span class="stale">取り込めません：${esc(r.error)}</span>`;return}
+    store.set('wx.ai',{at:new Date().toISOString(),key:AICTX?cacheKey(AICTX):'',data:r.data});
+    $('#aiPaste').value='';
+    $('#aiMsg2').innerHTML=`取り込みました${r.warn?.length?`<span class="stale">（${r.warn.map(esc).join('／')}）</span>`:''}`;
+    /* 話すポイントを出し直す */
+    for(const n of [1,2,3,4,5,6,7,8]) loaded.delete(n);
+    for(const n of [1,2,3,4,5,6,7,8]) $(`#scr${n} .body`).innerHTML='';
+    renderAi();renderHomeSummary();
+  };
+  const c=$('#aiClear');
+  if(c) c.onclick=()=>{if(!confirm('AI解説を消しますか'))return;store.del('wx.ai');for(const n of [1,2,3,4,5,6,7,8]) loaded.delete(n);renderAi();renderHomeSummary()};
+}
+function aiSummaryHtml(ai){
+  const d=ai.data||{};
+  return `<div style="margin-top:10px">
+    ${ai.stale?'<p class="err">このAI解説を作ったあとに資料が更新されています。作り直してください。</p>':''}
+    ${d.summary3?.length?`<h3>3行要約</h3>${d.summary3.map(t=>`<div>${esc(t)}</div>`).join('')}`:''}
+    ${d.cautions?.length?`<h3 style="margin-top:8px">注意</h3><ul style="padding-left:1.2em">${d.cautions.map(t=>`<li>${esc(t)}</li>`).join('')}</ul>`:''}
+    ${d.unknowns?.length?`<h3 style="margin-top:8px">読み取れなかった項目</h3><ul style="padding-left:1.2em">${d.unknowns.map(t=>`<li>${esc(t)}</li>`).join('')}</ul>`:''}
+    ${d.sections?.length?`<h3 style="margin-top:8px">各画面の話すポイント</h3><table class="t">${d.sections.map(x=>`<tr><td class="m" style="width:3.5em"><a href="#" data-go="${x.screen}">画面${x.screen}</a></td><td>${esc(x.talk)}<div class="why">根拠：${x.basis.map(esc).join(' ／ ')||'（なし）'}</div></td></tr>`).join('')}</table>`:''}
+    <p class="note">AIによる参考解説です。数値の判定はアプリの計算（上の総合解析）が優先です。</p>
+  </div>`;
+}
+
 /* ═════════ 9 まとめ（総合解析とブリーフィング台本） ═════════ */
 /* 仕様書 第4章の「総合解析」のうち、コードで計算できる突き合わせ（lib/signals.js）を出し、
    そこから読み上げ用の台本を組み立てる。AI解説（フェーズ3）は、この結果を文章にする役割 */
 const SUM={sigs:[],lines:[],got:null};
+let AICTX=null;
 
 /* 台本に必要な材料を集める。まだ開いていない画面のデータは、ここで取りに行く */
 async function gatherContext({fetchIfMissing=true}={}){
@@ -2059,10 +2143,10 @@ async function loadSummary(){
   </div>
   <div class="card" id="sumSig"></div>
   <div class="card" id="sumScript"></div>
-  <div class="card"><h3>AI解説<span class="sp"></span><span class="badge none">未実装</span></h3>
-    <p class="note">フェーズ3で、この結果と公式の解説文をAIに渡して、話しやすい文章に整えます。AIに送るのは公開気象データと判定結果だけで、飛行場名・経路・基地名は送りません。</p></div>`;
+  <div class="card" id="sumAi"></div>`;
   $('#sumGo').onclick=()=>buildSummary(true);
-  buildSummary(false);
+  await buildSummary(false);
+  renderAi();
 }
 async function buildSummary(force){
   const st=$('#sumStatus');if(!st)return;
@@ -2074,10 +2158,17 @@ async function buildSummary(force){
     SUM.lines=script({sigs:SUM.sigs,judges:{total:worst(JUDGE_ROWS.filter(r=>!r.none).map(r=>JUDGE.get(r.n)?.level||'none'))},
       window:ctx.win,airfields:ctx.airfields,route:ctx.route});
     SUM.got=new Date();
+    /* AIに渡す材料（手貼り・API どちらでも同じものを使う） */
+    AICTX={win:ctx.win,judges:{total:worst(JUDGE_ROWS.filter(r=>!r.none).map(r=>JUDGE.get(r.n)?.level||'none')),
+      ...Object.fromEntries(JUDGE_ROWS.map(r=>[r.n,JUDGE.get(r.n)?.level||'none']))},
+      sigs:SUM.sigs,airfields:ctx.airfields,nwp:ctx.nwp?{...ctx.nwp,got:VERT.data?.got}:null,route:ctx.route,
+      office:(store.get('wx.cfg')||{}).office||null,learn:learnOn()};
+    const ai=aiGet();
+    if(ai) {ai.stale=ai.key!==cacheKey(AICTX);store.set('wx.ai',ai)}
     renderHomeSummary();
     st.innerHTML=`作成 ${fJst(SUM.got)} ・ 対象 ${fJst(ctx.win.from)}〜${fJst(ctx.win.to)} JST`
       +`<br>材料：${ctx.nwp?`数値予報（${esc(ctx.vertAd||'')}）`:'数値予報なし'} ／ ${ctx.airfields.length?`飛行場 ${ctx.airfields.map(a=>a.icao).join('・')}`:'飛行場なし'} ／ ${ctx.route?`経路 ${ctx.route.rows.length}区間`:'経路なし'}`;
-    renderSignals();renderScript();
+    renderSignals();renderScript();renderAi();
   }catch(e){st.innerHTML=`<span class="stale">作れませんでした：${esc(e.message)}</span>`}
 }
 function renderSignals(){
