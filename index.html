@@ -202,7 +202,7 @@ import { splitRoute, passTimes, routeNM, routeMinutes, judgeRoute, judgePass, pa
 import { signals, script } from './lib/signals.js';
 import { buildPrompt, parseAiJson, cacheKey } from './lib/ai.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p3-2', BUILD='2026-09-21';
+const VER_TAG='p3-3', BUILD='2026-09-21';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -2041,22 +2041,46 @@ function renderAi(){
   const ai=aiGet(),anon=store.get('wx.aiAnon')!==false;
   el.innerHTML=`
     <h3>AI解説<span class="sp"></span>${ai?`<span class="note">${fJst(new Date(ai.at))}作成</span>`:'<span class="badge none">未作成</span>'}</h3>
-    <p class="note">いまは<b>手貼り</b>で動きます（無料）。「プロンプトをコピー」→ Claude などに貼る → 返ってきたJSONを下に貼り戻すと、各画面の「話すポイント」とホームの3行要約に出ます。公開後は中継経由で自動にします（月500円の上限つき）。</p>
-    <div class="row"><button id="aiCopy">プロンプトをコピー</button>
-      <label class="chk"><input type="checkbox" id="aiAnon" ${anon?'checked':''}>飛行場・地点名を伏せて送る</label>
+    <p class="note">いまは<b>手貼り</b>で動きます（Claudeのアプリ・サイトを使うので、APIの課金はありません）。<b>iPhoneでの手順</b>：「Claudeで開く」→ 送信 → 返ってきたJSONを長押しでコピー → このアプリに戻って「クリップボードから貼り付け」→「取り込む」。公開後は中継経由の自動取得にも切り替えられます（月500円の上限つき）。</p>
+    <div class="row"><button id="aiOpen">Claudeで開く</button><button id="aiCopy">プロンプトをコピー</button><button id="aiShare" style="display:none">共有</button>
       <span id="aiMsg" class="note"></span></div>
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="aiAnon" ${anon?'checked':''}>飛行場・地点名を伏せて送る</label>
+      <label class="chk"><input type="checkbox" id="aiCompact" ${store.get('wx.aiCompact')!==false?'checked':''}>短く送る（電文の原文を外す・スマホ向け）</label>
+    </div>
     <details><summary>送る内容を見る（外部に出るのはこれだけ）</summary><div class="raw" id="aiPreview" style="max-height:220px;overflow:auto;white-space:pre-wrap"></div></details>
     <textarea id="aiPaste" placeholder='AIの返事（JSON）をここに貼る'></textarea>
-    <div class="row"><button id="aiApply">取り込む</button>${ai?'<button id="aiClear">消す</button>':''}<span id="aiMsg2" class="note"></span></div>
+    <div class="row"><button id="aiPasteBtn">クリップボードから貼り付け</button><button id="aiApply">取り込む</button>${ai?'<button id="aiClear">消す</button>':''}<span id="aiMsg2" class="note"></span></div>
     ${ai?aiSummaryHtml(ai):''}`;
   const build=()=>{
     const ctx=AICTX||{};
-    AIPROMPT=buildPrompt({...ctx,anonymize:store.get('wx.aiAnon')!==false,learn:learnOn()});
+    AIPROMPT=buildPrompt({...ctx,anonymize:store.get('wx.aiAnon')!==false,compact:store.get('wx.aiCompact')!==false,learn:learnOn()});
     $('#aiPreview').textContent=AIPROMPT.text;
     return AIPROMPT;
   };
   build();
   $('#aiAnon').onchange=e=>{store.set('wx.aiAnon',e.target.checked);build();$('#aiMsg').textContent=e.target.checked?'伏せて送ります':'そのまま送ります'};
+  $('#aiCompact').onchange=e=>{store.set('wx.aiCompact',e.target.checked);const p=build();$('#aiMsg').textContent=`${p.text.length}文字`};
+  /* スマホ：Claudeアプリ/サイトをプロンプト入りで開く。長すぎるときはコピーに切り替える */
+  $('#aiOpen').onclick=()=>{
+    const p=build(),A=SRCDEF.ai||{};
+    const url=(A.openUrl||'https://claude.ai/new?q={q}').replace('{q}',encodeURIComponent(p.text));
+    if(url.length>(A.maxUrlLen||12000)){
+      $('#aiMsg').textContent='長すぎるのでコピーしました（「短く送る」を入れるとリンクで開けます）。Claudeを開いて貼り付けてください';
+      navigator.clipboard?.writeText(p.text).catch(()=>{});
+      return;
+    }
+    window.open(url,'_blank','noopener');
+    $('#aiMsg').textContent='Claudeを開きました。返事のJSONをコピーして戻ってきてください';
+  };
+  if(navigator.share){
+    const sb=$('#aiShare');sb.style.display='';
+    sb.onclick=async()=>{const p=build();try{await navigator.share({title:'WX BRF AI解説',text:p.text});$('#aiMsg').textContent='共有しました'}catch(e){}};
+  }
+  $('#aiPasteBtn').onclick=async()=>{
+    try{const t=await navigator.clipboard.readText();$('#aiPaste').value=t;$('#aiMsg2').textContent=`${t.length}文字を貼りました`}
+    catch(e){$('#aiMsg2').textContent='読めません。長押しで貼り付けてください'}
+  };
   $('#aiCopy').onclick=async()=>{
     const p=build();
     try{await navigator.clipboard.writeText(p.text);$('#aiMsg').textContent=`コピーしました（${p.text.length}文字）`}

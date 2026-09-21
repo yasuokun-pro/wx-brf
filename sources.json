@@ -810,5 +810,10 @@
   "cameras": {
     "_note": "ライブカメラは利用者が自分で登録する（URLは端末内のみ）。画像の直リンクは <img> で表示し、ページだけのものはリンクで開く。提供元の規約に従い、自分が見る用途だけに使う（再配信しない）",
     "help": "https://www.mlit.go.jp/road/bosai/LIVEcamera.html"
+  },
+  "ai": {
+    "_note": "AI解説の手貼り用。openUrl はプロンプトを入れてClaudeを開くリンク（スマホ用）。URL全体が maxUrlLen 文字を超えたら、開かずにコピーへ切り替える（途中で切れるのを防ぐため）",
+    "openUrl": "https://claude.ai/new?q={q}",
+    "maxUrlLen": 12000
   }
 }

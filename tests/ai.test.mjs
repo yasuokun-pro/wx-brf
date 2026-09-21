@@ -94,3 +94,16 @@ test('キャッシュのキー：同じ資料なら同じ、電文が変われ�
   const ctx2 = { ...CTX, airfields: [{ ...CTX.airfields[0], p: { ...CTX.airfields[0].p, time: new Date(Date.UTC(2026, 8, 21, 1)) } }] };
   assert.notEqual(cacheKey(ctx2), k1);
 });
+
+test('compact：スマホで貼りやすいように短くする（電文の原文を外し、間引きを粗く）', () => {
+  const full = buildPrompt(CTX).text, small = buildPrompt({ ...CTX, compact: true }).text;
+  assert.ok(small.length < full.length, `${small.length} < ${full.length}`);
+  assert.equal(/METAR/.test(small), false, '電文の原文が残っている');
+  /* 判定・シグナル・雲底は残す */
+  assert.match(small, /霧・低い雲/);
+  assert.match(small, /baseFt/);
+  /* 経路は注意以上の区間だけ */
+  const p = buildPayload({ ...CTX, compact: true });
+  assert.equal(p.route.length, 1);
+  assert.equal(buildPayload({ ...CTX, compact: true, route: { rows: [{ legFrom: 'A', legTo: 'B', level: 'go', items: [] }] } }).route.length, 0);
+});
