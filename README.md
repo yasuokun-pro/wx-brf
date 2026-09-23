@@ -4,6 +4,12 @@
 
 公式の気象ブリーフィングの補助です。飛行可否の最終判断には使わないでください。
 
+## 公開先
+
+- 公開URL：<https://yasuokun-pro.github.io/wx-brf/>（iPhoneのSafariで開き、共有→ホーム画面に追加）
+- リポジトリ：<https://github.com/yasuokun-pro/wx-brf>（公開。設定・経路・ミニマ・写真・カメラのURLは端末内のみで、ここには入らない）
+- 更新：コミット → `git push` で1〜2分後に反映。`sw.js` の `VER`、`index.html` の `VER_TAG`・`BUILD` を必ず一緒に上げる
+
 ## ファイル
 
 | ファイル | 役割 |
@@ -40,6 +46,8 @@
 ```bash
 python3 -m http.server 8765
 ```
+
+同じWi-FiのiPhoneからは `http://<MacのIP>:8765` でも開ける（ただし http なのでオフライン用のキャッシュは働かない）。
 
 ブラウザで <http://localhost:8765> を開く。
 
