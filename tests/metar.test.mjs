@@ -87,7 +87,7 @@ test('国内配信の電文（末尾=、RMK国内様式）', () => {
   assert.deepEqual(m.unparsed, []);
 });
 
-test('米軍基地の SM・A（inHg）・TCU', () => {
+test('マイル表記(SM)・inHg の電文', () => {
   const m = parseMetar('METAR RODN 170455Z 09012KT 10SM FEW020TCU SCT250 30/24 A2983 RMK AO2A', { ref: REF });
   assert.equal(m.vis.sm, 10);
   assert.equal(m.vis.m, 16093);
@@ -143,7 +143,7 @@ test('TAF：FM群と CAVOK の後の雲', () => {
   assert.equal(ceiling(merged).ft, 1500);
 });
 
-test('米軍TAFの QNH....INS は解析済みとして扱う', () => {
+test('QNH....INS を含むTAF は解析済みとして扱う', () => {
   const t = parseTaf('TAF RODN 171100Z 1712/1818 09012KT 9999 FEW020 QNH2984INS BECMG 1800/1802 12010KT 9999 SCT025 QNH2987INS', { ref: REF });
   assert.deepEqual(t.unparsed, []);
 });

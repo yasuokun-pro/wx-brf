@@ -84,11 +84,11 @@ test('経路：一番厳しい区間を拾う', () => {
   assert.equal(sigRoute({ rows: [{ level: 'go', items: [] }] }), null);
 });
 
-test('資料の食い違い：TAFと数値予報の雲底が1500ft以上違えば「予報官に確認」', () => {
+test('資料の食い違い：TAFと数値予報の雲底が1500ft以上違えば「気象担当者に確認」', () => {
   const taf = parseTaf('TAF RJTT 200505Z 2006/2112 18010KT 9999 BKN005', { ref: REF });
   const s = sigMismatch(nwpOf({ base: () => 4000 }), taf, WIN);
   assert.equal(s.ask, true);
-  assert.match(s.text, /予報官に確認/);
+  assert.match(s.text, /気象担当者に確認/);
   /* 近ければ出ない */
   assert.equal(sigMismatch(nwpOf({ base: () => 1200 }), taf, WIN), null);
 });
@@ -119,7 +119,7 @@ test('ブリーフィング台本：判定と根拠から文章を作る', () =>
   assert.match(text, /RJTT/);
   assert.match(text, /経路は1区間のうち1区間/);
   assert.match(text, /総合判定は注意/);
-  assert.match(text, /予報官ブリーフィング/);
+  assert.match(text, /公式の気象ブリーフィング/);
   /* 画面番号が付いていて、そこへ飛べる */
   assert.ok(lines.every(l => Number.isInteger(l.screen)));
 });

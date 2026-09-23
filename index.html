@@ -183,7 +183,7 @@
     <div class="mid" id="navMid"></div>
     <button id="next">次 ▶</button>
   </div>
-  <div class="disc">予報官ブリーフィングの補助です。飛行可否の最終判断には使わないでください。図の多くは数値予報からの自動作成で、気象庁が発表する飛行場予報等と異なる場合があります。出典：気象庁・国土地理院 <span id="ver"></span></div>
+  <div class="disc">公式の気象ブリーフィングの補助です。飛行可否の最終判断には使わないでください。図の多くは数値予報からの自動作成で、気象庁が発表する飛行場予報等と異なる場合があります。出典：気象庁・国土地理院 <span id="ver"></span></div>
 </footer>
 
 <div id="viewer">
@@ -335,7 +335,7 @@ function activate(i){
 function laterHtml(s){
   return `<div class="card"><h3>${s.name}<span class="sp"></span><span class="badge none">データなし</span></h3>
   <p class="note">この画面は${s.later}で作ります。${({
-    5:'METAR/TAFの原文と日本語デコード、横風成分、ミニマ判定。国際配信されない飛行場のMETARは写真からテキスト認識でコピーして貼り付ける欄を設けます。',
+    5:'METAR/TAFの原文と日本語デコード、横風成分、ミニマ判定。METARが配信されていない飛行場のMETARは写真からテキスト認識でコピーして貼り付ける欄を設けます。',
     9:''})[s.n]||''}</p></div>`;
 }
 
@@ -350,7 +350,7 @@ function talkHtml(n){
   const conf={high:'確度 高',mid:'確度 中',low:'確度 低'};
   return `<div class="talk"><b>話すポイント（AI解説）</b>
     ${sec.map(x=>`<div style="margin-top:4px">${esc(x.talk)}<div class="note">根拠：${x.basis.map(esc).join(' ／ ')||'（なし）'} ・ ${conf[x.confidence]||''}</div></div>`).join('')}
-    <div class="note" style="margin-top:4px">AIによる参考解説。予報官ブリーフィングを優先。作成 ${ai.at?fJst(new Date(ai.at)):''}${ai.stale?'<span class="stale"> ・資料が更新されています</span>':''}</div></div>`;
+    <div class="note" style="margin-top:4px">AIによる参考解説。公式の気象ブリーフィングを優先。作成 ${ai.at?fJst(new Date(ai.at)):''}${ai.stale?'<span class="stale"> ・資料が更新されています</span>':''}</div></div>`;
 }
 /* 画面の中の data-go リンク（AI解説・シグナル）で画面を移動する */
 function bindGoLinks(root){
@@ -546,7 +546,7 @@ async function loadHome(){
   <div class="card">
     <h3>3行要約<span class="sp"></span><a href="#" data-go="9" class="note">まとめ画面へ</a></h3>
     <div id="homeSum" class="note">「9 まとめ」を開くと、各画面の判定を突き合わせた要約を作ります。</div>
-    <p class="note">フェーズ3では、ここにAIが整えた文章を出します（AIによる参考解説。予報官ブリーフィングを優先）。</p>
+    <p class="note">フェーズ3では、ここにAIが整えた文章を出します（AIによる参考解説。公式の気象ブリーフィングを優先）。</p>
   </div>
   <div class="card">
     <h3>各画面の判定</h3>
@@ -1196,7 +1196,7 @@ async function loadAirfields(){
     </table>`)}
   <div class="card">
     <h3>電文を貼り付け</h3>
-    <p class="note">国際配信されない飛行場は、iPhoneの写真アプリでMETAR/TAFの文字を長押し（テキスト認識表示）してコピーし、ここに貼ります。読み取りは端末の中だけで行い、どこにも送りません。METAR・SPECI・TAF で始まる行ごとに分けるので、まとめて貼れます。</p>
+    <p class="note">METARが配信されていない飛行場は、iPhoneの写真アプリでMETAR/TAFの文字を長押し（テキスト認識表示）してコピーし、ここに貼ります。読み取りは端末の中だけで行い、どこにも送りません。METAR・SPECI・TAF で始まる行ごとに分けるので、まとめて貼れます。</p>
     <textarea id="pasteTxt" placeholder="METAR RJxx 170500Z 36006KT 9999 FEW020 25/16 Q1019=&#10;TAF RJxx 170505Z 1706/1812 ..."></textarea>
     <div class="row"><button id="pasteGo">取り込む</button><span id="pasteMsg" class="note"></span></div>
   </div>
@@ -1344,7 +1344,7 @@ function renderAdCards(){
       ${metar?`<div class="meta">観測 ${metar.p.time?`${fBoth(metar.p.time)}（${ago(metar.p.time)}）`:'時刻不明'}${metarCounts?'':' ・判定の時間帯が先なので総合には入れていません'}<br><span style="color:${{VMC:'var(--grn)',SVFR:'#ff8a3d',IMC:'var(--red)'}[jm.flight.rule]||'var(--dim)'}">${jm.flight.rule||'VMC/IMC不明'}</span>：${esc(jm.flight.why)}</div>
         ${rawHtml(metar.p,'m_'+icao)}${itemsTable(jm.items)}
         ${metar.hist?.length?`<details><summary>過去3時間のMETAR</summary><div class="raw" style="line-height:1.6">${metar.hist.map(h=>esc(h.raw)).join('<br>')}</div></details>`:''}`
-        :`<p class="note">METARがありません。${opt.manualOnly?'':'国際配信されていない飛行場の可能性があります。'}電文を貼り付けてください。</p>`}
+        :`<p class="note">METARがありません。${opt.manualOnly?'':'METARが配信されていない飛行場の可能性があります。'}電文を貼り付けてください。</p>`}
       <h3 style="margin-top:10px">TAF<span class="sp"></span>${taf?srcTag(taf):''}${jt?tafFrSummary(jt):''}${jt?badge(jt.level):''}</h3>
       ${taf?`<div class="meta">発表 ${taf.p.issue?fBoth(taf.p.issue):'不明'} ・有効 ${taf.p.from?`${fJst(taf.p.from)}〜${fJst(taf.p.to)} JST`:'不明'}</div>
         ${rawHtml(taf.p,'t_'+icao)}
@@ -1715,7 +1715,7 @@ async function loadRoute(){
     ${figHtml('figSgN','下層悪天予想図（通常版）')}
   </div>
   <div class="card">
-    <h3>予報官の経路予報（写真）<span class="sp"></span><label class="chk"><input type="file" id="rtePhoto" accept="image/*" style="display:none"><button id="rtePhotoBtn">写真を追加</button></label></h3>
+    <h3>経路の気象資料（写真）<span class="sp"></span><label class="chk"><input type="file" id="rtePhoto" accept="image/*" style="display:none"><button id="rtePhotoBtn">写真を追加</button></label></h3>
     <p class="note">ブリーフィングでもらった経路予報などを、この端末の中だけに保存して並べて見られます。外には送りません。</p>
     <div id="rtePhotos" class="wsGrid"></div>
   </div>`;
@@ -1767,7 +1767,7 @@ async function loadRoute(){
   if(savedN){$('#sgNArea').value=savedN[0];$('#sgNFt').value=savedN[1]}
   $('#sgNArea').onchange=loadSgN;$('#sgNFt').onchange=loadSgN;loadSgN();
 
-  /* 予報官の経路予報の写真 */
+  /* 経路の気象資料の写真 */
   $('#rtePhotoBtn').onclick=()=>$('#rtePhoto').click();
   $('#rtePhoto').onchange=async e=>{
     const f=e.target.files?.[0];if(!f)return;
@@ -1998,7 +1998,7 @@ function renderPasses(){
   });
 }
 
-/* ───────── 予報官の経路予報の写真（端末内だけ・IndexedDB） ───────── */
+/* ───────── 経路の気象資料の写真（端末内だけ・IndexedDB） ───────── */
 function idb(){
   return new Promise((res,rej)=>{
     const q=indexedDB.open('wxbrf',1);
@@ -2200,7 +2200,7 @@ function renderSignals(){
   const lvl={alert:'nogo',caution:'caution',info:'go'};
   el.innerHTML=`<h3>総合解析（資料の突き合わせ）<span class="sp"></span><span class="note">根拠の数が多いほど確か</span></h3>
     ${SUM.sigs.length?SUM.sigs.map(s=>`<div style="margin:10px 0">
-      <div><span class="lvl ${lvl[s.level]}"></span><b>${esc(s.title)}</b>${s.ask?' <span class="badge caution">予報官に確認</span>':''} <span class="note">根拠 ${s.basis.length}件</span></div>
+      <div><span class="lvl ${lvl[s.level]}"></span><b>${esc(s.title)}</b>${s.ask?' <span class="badge caution">気象担当者に確認</span>':''} <span class="note">根拠 ${s.basis.length}件</span></div>
       <div class="note" style="margin:2px 0 4px">${esc(s.text)}</div>
       <table class="t">${s.basis.map(x=>`<tr><td>${esc(x.what)}</td><td style="text-align:right;width:5em"><a href="#" data-go="${x.screen}">画面${x.screen}</a></td></tr>`).join('')}</table>
     </div>`).join(''):'<p class="note">突き合わせで出たシグナルはありません（材料が足りないか、目立った変化がありません）。</p>'}`;
