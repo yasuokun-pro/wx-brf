@@ -1,7 +1,7 @@
 /* node --test tests/ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { anonymize, deanonymize, buildPayload, buildPrompt, parseAiJson, systemPrompt, cacheKey } from '../lib/ai.js';
+import { anonymize, deanonymize, buildPayload, buildPrompt, parseAiJson, systemPrompt, cacheKey, nwpSummary } from '../lib/ai.js';
 
 const WIN = { from: new Date(Date.UTC(2026, 8, 21, 0)), to: new Date(Date.UTC(2026, 8, 21, 3)) };
 const CTX = {
@@ -98,7 +98,9 @@ test('キャッシュのキー：同じ資料なら同じ、電文が変われ�
 test('compact：スマホで貼りやすいように短くする（電文の原文を外し、間引きを粗く）', () => {
   const full = buildPrompt(CTX).text, small = buildPrompt({ ...CTX, compact: true }).text;
   assert.ok(small.length < full.length, `${small.length} < ${full.length}`);
-  assert.equal(/METAR/.test(small), false, '電文の原文が残っている');
+  /* 電文の原文（観測時刻や風の群）が入っていない。coverageの説明文にMETARの語は出てよい */
+  assert.equal(/210000Z|36006KT/.test(small), false, '電文の原文が残っている');
+  assert.equal(buildPayload({ ...CTX, compact: true }).airfields[0].metarRaw, undefined);
   /* 判定・シグナル・雲底は残す */
   assert.match(small, /霧・低い雲/);
   assert.match(small, /baseFt/);
@@ -106,4 +108,53 @@ test('compact：スマホで貼りやすいように短くする（電文の原�
   const p = buildPayload({ ...CTX, compact: true });
   assert.equal(p.route.length, 1);
   assert.equal(buildPayload({ ...CTX, compact: true, route: { rows: [{ legFrom: 'A', legTo: 'B', level: 'go', items: [] }] } }).route.length, 0);
+  /* 判定の「なし」は省き、週間は5日ぶんに絞る */
+  const weekly = [1, 2, 3, 4, 5, 6, 7].map(d => ({ t: `2026-09-2${d}T00:00:00+09:00`, area: '東京地方', weather: '晴れ', pop: '10', reliability: 'A', tmax: '25', tmin: '18' }));
+  const c = buildPayload({ ...CTX, compact: true, judges: { total: 'caution', 5: 'caution', 2: 'none' }, weekly });
+  assert.equal(c.judges['2'], undefined);
+  assert.equal(c.judges['5'], 'caution');
+  assert.equal(c.weekly.length, 5);
+  assert.equal(c.weekly[0].tmax, undefined);
+  assert.equal(c.signals[0].text, undefined);
+});
+
+test('coverage：画像だけの資料は「入っていない」と伝え、無いものを並べさせない', () => {
+  const p = buildPayload(CTX);
+  assert.ok(p.coverage.sent.some(x => x.startsWith('6')));
+  assert.ok(p.coverage.imageOnly.some(x => x.startsWith('2')));
+  const sp = systemPrompt({});
+  assert.match(sp, /imageOnly/);
+  assert.match(sp, /unknowns にも書かない/);
+  assert.match(sp, /precipMmh/);
+});
+
+test('極値：間引いた行では見えない最悪値を時刻つきで渡す', () => {
+  const s = nwpSummary(CTX.nwp, { from: new Date(Date.UTC(2026, 8, 21, 0)), to: new Date(Date.UTC(2026, 8, 21, 5)) });
+  /* 気温露点差の最小は 3時（22-18=4）ではなく 0〜2時の 1℃ */
+  assert.equal(s.minSpreadC.v, 1);
+  assert.equal(s.minSpreadC.t, '2026-09-21T00:00:00.000Z');
+  assert.equal(s.maxWindKt.v, 12);
+  assert.equal(s.maxPrecipMmh.v, 1);
+  assert.equal(s.minBaseFt.v, 800);
+  assert.equal(s.maxCape.v, 900);
+  assert.equal(s.minSsi.v, -1);
+  /* 送るデータにも入る */
+  assert.ok(buildPayload(CTX).nwp.summary.minBaseFt);
+});
+
+test('府県天気予報と週間予報も送る（画面7・8の話ができるように）', () => {
+  const p = buildPayload({ ...CTX,
+    fcst: [{ t: '2026-09-21T00:00:00+09:00', area: '東京地方', weather: 'くもり', wind: '北の風' }],
+    weekly: [{ t: '2026-09-22T00:00:00+09:00', area: '東京地方', weather: '晴れ', pop: '20', reliability: 'A', tmax: '25', tmin: '18' }] });
+  assert.equal(p.fcst.length, 1);
+  assert.equal(p.weekly[0].reliability, 'A');
+  /* 無ければ入れない */
+  assert.equal(buildPayload(CTX).weekly, undefined);
+});
+
+test('短いシステムプロンプト：決まりは残したまま短くなる', () => {
+  const full = systemPrompt({}), small = systemPrompt({ compact: true });
+  assert.ok(small.length < full.length * 0.8, `${small.length} < ${full.length}`);
+  for (const must of [/basis/, /断定しない/, /気象担当者に確認/, /imageOnly/, /summary3/, /screen番号|screen の番号/]) assert.match(small, must);
+  assert.match(systemPrompt({ compact: true, learn: true }), /用語/);
 });
