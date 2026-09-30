@@ -202,7 +202,7 @@ import { splitRoute, passTimes, routeNM, routeMinutes, judgeRoute, judgePass, pa
 import { signals, script } from './lib/signals.js';
 import { buildPrompt, parseAiJson, cacheKey } from './lib/ai.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p3-4', BUILD='2026-09-30';
+const VER_TAG='p3-5', BUILD='2026-09-30';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -2127,7 +2127,8 @@ async function gatherContext({fetchIfMissing=true}={}){
     const {metar,taf}=pickSources(icao),rw=runwaysOf(icao);
     const jm=metar?judgeMetar(metar.p,mn,{runways:rw}):null;
     const jt=taf?judgeTaf(taf.p,mn,{runways:rw,from:win.from,to:win.to}):null;
-    return {icao,metar:jm?.level,taf:jt?.level,rule:jm?.flight?.rule,p:metar?.p,t:taf?.p};
+    return {icao,metar:jm?.level,taf:jt?.level,rule:jm?.flight?.rule,p:metar?.p,t:taf?.p,
+      metarSummary:metarValues(metar),tafSummary:tafValues(taf,jt)};
   });
   /* 鉛直：画面6の数値予報（選んでいる飛行場、無ければ先頭） */
   let nwp=null;
@@ -2157,6 +2158,39 @@ async function gatherContext({fetchIfMissing=true}={}){
   }catch(e){}
   return {win,mn,airfields,nwp,route:RTE.rows?.length?RTE:null,vertAd,fcst,weekly};
 }
+/* 電文から読み取った値をAIに渡す形にする（原文を送らないときでも数値が伝わるように）。
+   貼り付けた電文（手入力）も中継のものと同じ形で入る */
+function metarValues(m){
+  if(!m?.p) return null;
+  const p=m.p,c=ceiling(p),w=p.wind&&!p.wind.missing?p.wind:null;
+  return {
+    src:m.src==='manual'?'手入力':'中継',
+    obs:p.time?p.time.toISOString():null,
+    obsAgeMin:p.time?Math.round((Date.now()-p.time)/60000):null,
+    ceilFt:c.ft??(c.none?'シーリングなし':null),
+    visM:p.vis&&!p.vis.missing?p.vis.m:null,
+    windDir:w?(w.vrb?'VRB':w.dir):null, windKt:w?w.spd:null, gustKt:w?.gust??null,
+    wx:(p.wx||[]).map(x=>x.raw), clouds:(p.clouds||[]).map(l=>`${l.cover||'///'}${l.base==null?'///':String(l.base/100).padStart(3,'0')}${l.type||''}`),
+    tempC:p.temp??null, dewC:p.dew??null, qnh:p.qnh??null,
+  };
+}
+function tafValues(t,jt){
+  if(!t?.p) return null;
+  const p=t.p;
+  /* 判定する時間帯のうち、最初に注意以上になる時刻とその理由だけ渡す */
+  const bad=(jt?.slots||[]).find(s=>s.level==='nogo')||(jt?.slots||[]).find(s=>s.level==='caution');
+  return {
+    src:t.src==='manual'?'手入力':'中継',
+    issue:p.issue?p.issue.toISOString():null,
+    valid:p.from&&p.to?[p.from.toISOString(),p.to.toISOString()]:null,
+    worst:jt?.level||null,
+    /* 「判定なし」の理由が分かるようにする（時間帯がTAFの有効期間から外れている場合が多い） */
+    note:(jt?.slots?.length&&!jt.slots.some(x=>x.covered))?'判定する時間帯がTAFの有効期間外':null,
+    firstBad:bad?{t:bad.from.toISOString(),level:bad.level,why:bad.hits.slice(0,3).map(h=>`${h.src} ${h.label} ${h.value}`)}:null,
+    changes:(p.changes||[]).map(g=>g.type).slice(0,6),
+  };
+}
+
 /* 画面6を開いていなくても、推定雲底・安定度・解析値を作れるようにする */
 function computeVertEst(){
   const d=VERT.data;if(!d)return;

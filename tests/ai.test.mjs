@@ -158,3 +158,22 @@ test('短いシステムプロンプト：決まりは残したまま短くな�
   for (const must of [/basis/, /断定しない/, /気象担当者に確認/, /imageOnly/, /summary3/, /screen番号|screen の番号/]) assert.match(small, must);
   assert.match(systemPrompt({ compact: true, learn: true }), /用語/);
 });
+
+test('貼り付けた電文（手入力）の値も送る。短く送るモードでも数値は残る', () => {
+  const ctx = { ...CTX, airfields: [{ ...CTX.airfields[0],
+    metarSummary: { src: '手入力', obsAgeMin: 25, ceilFt: 900, visM: 4000, windDir: 340, windKt: 12, wx: ['-RA'], tempC: 18, dewC: 17 },
+    tafSummary: { src: '中継', worst: 'caution', firstBad: { t: '2026-09-21T02:00:00.000Z', level: 'caution', why: ['TEMPO 視程 3000m'] }, changes: ['BECMG', 'TEMPO'] } }] };
+  for (const compact of [false, true]) {
+    const p = buildPayload({ ...ctx, compact });
+    assert.equal(p.airfields[0].metarValues.ceilFt, 900, `compact=${compact}`);
+    assert.equal(p.airfields[0].metarValues.src, '手入力');
+    assert.equal(p.airfields[0].tafValues.firstBad.level, 'caution');
+  }
+  /* 原文は compact のときだけ外れる */
+  assert.ok(buildPayload({ ...ctx, compact: false }).airfields[0].metarRaw);
+  assert.equal(buildPayload({ ...ctx, compact: true }).airfields[0].metarRaw, undefined);
+  /* 匿名化しても値は残る */
+  const { data } = anonymize(buildPayload({ ...ctx, compact: true }));
+  assert.equal(data.airfields[0].metarValues.ceilFt, 900);
+  assert.match(systemPrompt({ compact: true }), /metarValues/);
+});

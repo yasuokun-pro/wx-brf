@@ -814,6 +814,6 @@
   "ai": {
     "_note": "AI解説の手貼り用。openUrl はプロンプトを入れてClaudeを開くリンク（スマホ用）。URL全体が maxUrlLen 文字を超えたら、開かずにコピーへ切り替える（途中で切れるのを防ぐため）",
     "openUrl": "https://claude.ai/new?q={q}",
-    "maxUrlLen": 12000
+    "maxUrlLen": 16000
   }
 }
