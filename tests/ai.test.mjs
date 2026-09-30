@@ -177,3 +177,43 @@ test('貼り付けた電文（手入力）の値も送る。短く送るモー�
   assert.equal(data.airfields[0].metarValues.ceilFt, 900);
   assert.match(systemPrompt({ compact: true }), /metarValues/);
 });
+
+/* 気圧配置（lib/synoptic.js の結果）を渡す */
+const SYN = {
+  area: '関東甲信',
+  now: { key: 'trough', label: '気圧の谷・低気圧の接近', basis: ['東京 1008hPa', '西(新潟)−東(銚子) -6hPa'] },
+  later: { key: 'winter', label: '西高東低（冬型）', basis: [] },
+  trend: { key: 'worsening', label: '悪くなる方向', basis: ['東京の気圧 -4hPa（9時→18時）'] },
+  front: { when: WIN.from, cold: true, kind: '寒冷前線または気圧の谷', text: '12時前後に寒冷前線または気圧の谷が通る見込み。', basis: ['12時ごろ風向が 150°→300° に変わる'] },
+  text: '関東甲信は気圧の谷・低気圧の接近。',
+  basis: ['東京 1008hPa', '西(新潟)−東(銚子) -6hPa', '東京の気圧 -4hPa（9時→18時）'],
+  note: '数値予報の気圧・風・850hPa気温から機械的に当てはめたもの。前線の位置は天気図で確かめる',
+};
+
+test('気圧配置：配置・振れ方・前線と根拠を渡し、画面1を話せる扱いにする', () => {
+  const p = buildPayload({ ...CTX, synoptic: SYN });
+  assert.equal(p.synoptic.area, '関東甲信');
+  assert.equal(p.synoptic.now, '気圧の谷・低気圧の接近');
+  assert.equal(p.synoptic.later, '西高東低（冬型）');
+  assert.equal(p.synoptic.trend, 'worsening');
+  assert.equal(p.synoptic.front.cold, true);
+  assert.equal(p.synoptic.front.t, WIN.from.toISOString());
+  assert.ok(p.synoptic.basis.includes('西(新潟)−東(銚子) -6hPa'));
+  assert.match(p.coverage.note, /画面1は synoptic/);
+  /* compact でも配置と振れ方は落とさない（根拠だけ絞る） */
+  const c = buildPayload({ ...CTX, synoptic: SYN, compact: true });
+  assert.equal(c.synoptic.now, '気圧の谷・低気圧の接近');
+  assert.equal(c.synoptic.trend, 'worsening');
+  assert.ok(c.synoptic.basis.length <= 5);
+  /* 気圧配置が無ければ項目自体を入れない */
+  assert.equal(buildPayload(CTX).synoptic, undefined);
+  assert.equal(/画面1は synoptic/.test(buildPayload(CTX).coverage.note), false);
+});
+
+test('気圧配置：システムプロンプトで画面1の話し方を指示する', () => {
+  for (const compact of [false, true]) {
+    const sp = systemPrompt({ compact });
+    assert.match(sp, /synoptic/);
+    assert.match(sp, /前線/);
+  }
+});

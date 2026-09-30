@@ -386,6 +386,49 @@
     ],
     "attribution": "Open-Meteo（気象庁モデル）"
   },
+  "synoptic": {
+    "_note": "気圧配置の判定（lib/synoptic.js）。関東甲信越を囲む地点の海面気圧・風・850hPa気温を1回のリクエストでまとめて取る。role=center/west/east/south/mountain",
+    "area": "関東甲信",
+    "vars": [
+      "pressure_msl",
+      "wind_direction_10m",
+      "wind_speed_10m",
+      "precipitation",
+      "temperature_850hPa"
+    ],
+    "points": [
+      {
+        "name": "東京",
+        "role": "center",
+        "lat": 35.69,
+        "lon": 139.69
+      },
+      {
+        "name": "新潟",
+        "role": "west",
+        "lat": 37.9,
+        "lon": 139.02
+      },
+      {
+        "name": "銚子",
+        "role": "east",
+        "lat": 35.74,
+        "lon": 140.83
+      },
+      {
+        "name": "八丈島",
+        "role": "south",
+        "lat": 33.11,
+        "lon": 139.79
+      },
+      {
+        "name": "松本",
+        "role": "mountain",
+        "lat": 36.24,
+        "lon": 137.97
+      }
+    ]
+  },
   "sigwx": {
     "_note": "下層悪天予想図。通常版は地域×予想時間、詳細版は都道府県ごとの図番号。3時間毎に発表",
     "normal": {

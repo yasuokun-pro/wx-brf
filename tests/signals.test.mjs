@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { signals, sigDeterioration, sigThunder, sigFog, sigWind, sigFront, sigRoute, sigMismatch, script } from '../lib/signals.js';
 import { parseTaf } from '../lib/metar.js';
+import { describe as synDescribe } from '../lib/synoptic.js';
 
 const REF = new Date(Date.UTC(2026, 8, 20, 0));
 const H = h => new Date(Date.UTC(2026, 8, 20, h));
@@ -122,4 +123,49 @@ test('ブリーフィング台本：判定と根拠から文章を作る', () =>
   assert.match(text, /公式の気象ブリーフィング/);
   /* 画面番号が付いていて、そこへ飛べる */
   assert.ok(lines.every(l => Number.isInteger(l.screen)));
+});
+
+/* 気圧配置の段：lib/synoptic.js の結果を台本に入れる */
+const synOf = o => {
+  const n = 10, idx = [...Array(n).keys()];
+  const pt = (name, role, f = {}) => ({
+    name, role,
+    mslp: idx.map(i => f.mslp?.(i) ?? 1013), windDir: idx.map(i => f.dir?.(i) ?? 180),
+    windSpd: idx.map(() => 10), precip: idx.map(i => f.precip?.(i) ?? 0), t850: idx.map(i => f.t850?.(i) ?? 5),
+  });
+  return synDescribe({ times: idx.map(H), points: [
+    pt('東京', 'center', o.center || {}), pt('新潟', 'west', o.west || {}),
+    pt('銚子', 'east', o.east || {}), pt('八丈島', 'south', o.south || {}),
+  ] }, WIN, { area: '関東甲信' });
+};
+
+test('台本：気圧配置を最初に説明し、良い／悪いの向きと根拠を言う', () => {
+  const syn = synOf({
+    center: { mslp: i => 1012 - i, precip: i => (i >= 5 ? 1 : 0), dir: () => 120 },
+    west: { mslp: i => 1006 - i }, east: { mslp: i => 1014 - i }, south: { mslp: i => 1013 - i },
+  });
+  assert.equal(syn.now.key, 'trough');
+  const lines = script({ sigs: [], judges: { total: 'caution' }, window: WIN, synoptic: syn });
+  const i = lines.findIndex(l => /まず気圧配置です/.test(l.text));
+  assert.equal(i, 1);                                  /* 出だしの次に来る */
+  assert.ok(lines.slice(1, 5).every(l => l.screen === 1));  /* 画面1（天気図）を見ながら読む */
+  const text = lines.map(l => l.text).join('\n');
+  assert.match(text, /関東甲信は気圧の谷・低気圧の接近/);
+  assert.match(text, /天気は悪くなる方向です/);
+  assert.match(text, /根拠は、.*東京 \d+hPa/);
+  assert.match(text, /前線の影響です/);
+});
+
+test('台本：前線の兆しが無ければ天気図で確かめる言い方にする', () => {
+  const syn = synOf({ center: { mslp: () => 1020 }, west: { mslp: () => 1021 }, east: { mslp: () => 1019 }, south: { mslp: () => 1020 } });
+  assert.equal(syn.now.key, 'high');
+  const text = script({ sigs: [], judges: { total: 'go' }, window: WIN, synoptic: syn }).map(l => l.text).join('\n');
+  assert.match(text, /関東甲信は高気圧に覆われる/);
+  assert.match(text, /大きく変わらない見込みです/);
+  assert.match(text, /前線や気圧の谷が通る兆しはありません/);
+});
+
+test('台本：気圧配置のデータが無ければその段は出さない', () => {
+  const lines = script({ sigs: [], judges: { total: 'go' }, window: WIN });
+  assert.ok(!lines.some(l => /気圧配置/.test(l.text)));
 });

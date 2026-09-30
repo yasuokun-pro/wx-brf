@@ -200,9 +200,10 @@ import { meteogram, crossSection, skewT } from './lib/charts.js';
 import { addObs, addSnapshot, pairs as vPairs, stats as vStats, correction as vCorrection, applyCorrection, LEAD_BUCKETS, VARS as V_VARS } from './lib/verify.js';
 import { splitRoute, passTimes, routeNM, routeMinutes, judgeRoute, judgePass, parseRouteCode, distNM } from './lib/route.js';
 import { signals, script } from './lib/signals.js';
+import { describe as synopticOf } from './lib/synoptic.js';
 import { buildPrompt, parseAiJson, cacheKey } from './lib/ai.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p3-5', BUILD='2026-09-30';
+const VER_TAG='p3-6', BUILD='2026-09-30';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -2113,9 +2114,32 @@ function aiSummaryHtml(ai){
 }
 
 /* ═════════ 9 まとめ（総合解析とブリーフィング台本） ═════════ */
+/* ═════════ 気圧配置（関東甲信越） ═════════ */
+/* 1地点の気圧だけでは配置が分からないので、関東甲信越を囲む数地点をまとめて取り、lib/synoptic.js で
+   「西高東低」「南岸低気圧」などに当てはめる。天気図（画面1）を読むときの土台にする */
+let SYNWX=null;
+async function fetchSynoptic(){
+  const S=SRCDEF.synoptic,N=SRCDEF.nwp;
+  if(!S?.points?.length) return null;
+  const url=`${N.url}?latitude=${S.points.map(p=>p.lat).join(',')}&longitude=${S.points.map(p=>p.lon).join(',')}`
+    +`&hourly=${S.vars.join(',')}&forecast_days=${N.days}&wind_speed_unit=kn&timezone=UTC`;
+  const r=await getJSON(url);
+  const list=Array.isArray(r.data)?r.data:[r.data];
+  const t0=list[0]?.hourly?.time;
+  if(!t0?.length) return null;
+  SYNWX={got:r.got,offline:r.offline,times:t0.map(t=>new Date(t+'Z')),
+    points:S.points.map((p,i)=>{
+      const h=list[i]?.hourly||{};
+      return {name:p.name,role:p.role,mslp:h.pressure_msl||[],windDir:h.wind_direction_10m||[],
+        windSpd:h.wind_speed_10m||[],precip:h.precipitation||[],t850:h.temperature_850hPa||[]};
+    })};
+  setStatus('syn',{label:'気圧配置用の周辺地点',pubLabel:'取得',staleMin:180,got:r.got,offline:r.offline,err:null});
+  return SYNWX;
+}
+
 /* 仕様書 第4章の「総合解析」のうち、コードで計算できる突き合わせ（lib/signals.js）を出し、
    そこから読み上げ用の台本を組み立てる。AI解説（フェーズ3）は、この結果を文章にする役割 */
-const SUM={sigs:[],lines:[],got:null};
+const SUM={sigs:[],lines:[],got:null,syn:null};
 let AICTX=null;
 
 /* 台本に必要な材料を集める。まだ開いていない画面のデータは、ここで取りに行く */
@@ -2156,7 +2180,13 @@ async function gatherContext({fetchIfMissing=true}={}){
       pop:w0.areas[0].pops?.[i]||null,reliability:w0.areas[0].reliabilities?.[i]||null,
       tmax:w1?.areas?.[0]?.tempsMax?.[i]||null,tmin:w1?.areas?.[0]?.tempsMin?.[i]||null}));
   }catch(e){}
-  return {win,mn,airfields,nwp,route:RTE.rows?.length?RTE:null,vertAd,fcst,weekly};
+  /* 気圧配置：取れなくても台本は作る（その旨を台本に書く） */
+  let syn=null;
+  try{
+    if(fetchIfMissing||!SYNWX) await fetchSynoptic();
+    if(SYNWX) syn=synopticOf(SYNWX,win,{area:SRCDEF.synoptic?.area||'関東甲信'});
+  }catch(e){}
+  return {win,mn,airfields,nwp,route:RTE.rows?.length?RTE:null,vertAd,fcst,weekly,syn};
 }
 /* 電文から読み取った値をAIに渡す形にする（原文を送らないときでも数値が伝わるように）。
    貼り付けた電文（手入力）も中継のものと同じ形で入る */
@@ -2214,6 +2244,7 @@ async function loadSummary(){
     <p class="note">各画面の判定と数値予報を突き合わせて、注意点と読み上げ用の台本を作ります。AIは使っていません（フェーズ3でAIが文章を整えます）。</p>
     <div id="sumStatus" class="meta"></div>
   </div>
+  <div class="card" id="sumSyn"></div>
   <div class="card" id="sumSig"></div>
   <div class="card" id="sumScript"></div>
   <div class="card" id="sumAi"></div>`;
@@ -2228,21 +2259,43 @@ async function buildSummary(force){
     const ctx=await gatherContext({fetchIfMissing:force||!SUM.got});
     const first=ctx.airfields[0];
     SUM.sigs=signals({nwp:ctx.nwp,metar:first?.p,taf:first?.t,route:ctx.route,window:ctx.win,minima:ctx.mn});
+    SUM.syn=ctx.syn||null;
     SUM.lines=script({sigs:SUM.sigs,judges:{total:worst(JUDGE_ROWS.filter(r=>!r.none).map(r=>JUDGE.get(r.n)?.level||'none'))},
-      window:ctx.win,airfields:ctx.airfields,route:ctx.route});
+      window:ctx.win,airfields:ctx.airfields,route:ctx.route,synoptic:ctx.syn});
     SUM.got=new Date();
     /* AIに渡す材料（手貼り・API どちらでも同じものを使う） */
     AICTX={win:ctx.win,fcst:ctx.fcst,weekly:ctx.weekly,judges:{total:worst(JUDGE_ROWS.filter(r=>!r.none).map(r=>JUDGE.get(r.n)?.level||'none')),
       ...Object.fromEntries(JUDGE_ROWS.map(r=>[r.n,JUDGE.get(r.n)?.level||'none']))},
       sigs:SUM.sigs,airfields:ctx.airfields,nwp:ctx.nwp?{...ctx.nwp,got:VERT.data?.got}:null,route:ctx.route,
-      office:(store.get('wx.cfg')||{}).office||null,learn:learnOn()};
+      office:(store.get('wx.cfg')||{}).office||null,synoptic:ctx.syn,learn:learnOn()};
     const ai=aiGet();
     if(ai) {ai.stale=ai.key!==cacheKey(AICTX);store.set('wx.ai',ai)}
     renderHomeSummary();
     st.innerHTML=`作成 ${fJst(SUM.got)} ・ 対象 ${fJst(ctx.win.from)}〜${fJst(ctx.win.to)} JST`
-      +`<br>材料：${ctx.nwp?`数値予報（${esc(ctx.vertAd||'')}）`:'数値予報なし'} ／ ${ctx.airfields.length?`飛行場 ${ctx.airfields.map(a=>a.icao).join('・')}`:'飛行場なし'} ／ ${ctx.route?`経路 ${ctx.route.rows.length}区間`:'経路なし'}`;
-    renderSignals();renderScript();renderAi();
+      +`<br>材料：${ctx.syn?.now?.key?`気圧配置（${esc(ctx.syn.area)}）`:'気圧配置なし'} ／ ${ctx.nwp?`数値予報（${esc(ctx.vertAd||'')}）`:'数値予報なし'} ／ ${ctx.airfields.length?`飛行場 ${ctx.airfields.map(a=>a.icao).join('・')}`:'飛行場なし'} ／ ${ctx.route?`経路 ${ctx.route.rows.length}区間`:'経路なし'}`;
+    renderSynoptic();renderSignals();renderScript();renderAi();
   }catch(e){st.innerHTML=`<span class="stale">作れませんでした：${esc(e.message)}</span>`}
+}
+/* 気圧配置のカード（台本の元になる中身を、根拠つきで見せる） */
+function renderSynoptic(){
+  const el=$('#sumSyn');if(!el)return;
+  const syn=SUM.syn;
+  const head='<h3>気圧配置<span class="sp"></span><span class="note">数値予報の気圧から自動判定</span></h3>';
+  if(!syn?.now?.key){
+    el.innerHTML=head+'<p class="note">気圧配置を判定できていません（周辺地点の数値予報が取れていない）。天気図（画面1）で気圧の並びと前線の位置を確かめてください。</p>';
+    return;
+  }
+  const arrow={improving:'go',worsening:'nogo',steady:'caution'}[syn.trend.key]||'caution';
+  el.innerHTML=head+`
+    <table class="t">
+      <tr><td>いまの配置</td><td><b>${esc(syn.now.label)}</b></td></tr>
+      ${syn.later?`<tr><td>後半の配置</td><td><b>${esc(syn.later.label)}</b>に変わる見込み</td></tr>`:''}
+      <tr><td>天気の振れ方</td><td><span class="lvl ${arrow}"></span><b>${esc(syn.trend.label)}</b></td></tr>
+      <tr><td>前線・気圧の谷</td><td>${syn.front?esc(syn.front.text):'数値の上では通過の兆しなし（天気図で確かめる）'}</td></tr>
+    </table>
+    <p class="note">根拠：${syn.basis.map(esc).join(' ／ ')}</p>
+    <p class="note">${esc(syn.note)}。<a href="#" data-go="1">画面1の天気図を見る</a></p>`;
+  el.querySelectorAll('[data-go]').forEach(a=>a.onclick=e=>{e.preventDefault();goTo(SCREENS.findIndex(x=>x.n===+a.dataset.go))});
 }
 function renderSignals(){
   const el=$('#sumSig');if(!el)return;

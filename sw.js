@@ -3,7 +3,7 @@
    - 気象データ(一覧JSON・図・PDF)は「ネット優先、失敗したら前回分」。前回分には x-wx-offline: 1 を付けて返す
    - 地図タイル(時刻入りURLなので中身が変わらない)はキャッシュ優先
    ※ index.html 等を更新したら VER を上げる(index.html の VER_TAG・BUILD も一緒に) */
-const VER = 'wxbrf-p3-5';
+const VER = 'wxbrf-p3-6';
 const DATA_CACHE = 'wxbrf-data';
 const TILE_CACHE = 'wxbrf-tiles';
 const TILE_MAX = 3000;
@@ -23,6 +23,7 @@ const SHELL = [
   './lib/verify.js',
   './lib/route.js',
   './lib/signals.js',
+  './lib/synoptic.js',
   './lib/ai.js',
   './icon-192.png',
   './icon-512.png',
@@ -33,8 +34,19 @@ const SHELL = [
   PDFJS + 'pdf.worker.min.mjs'
 ];
 
+/* シェルの取り込み。cache:'reload' でブラウザのHTTPキャッシュを通さず取り直す
+   （これをしないと VER を上げても古いJSがそのまま入ってしまう） */
+async function precache() {
+  const c = await caches.open(VER);
+  await Promise.all(SHELL.map(async u => {
+    const req = new Request(u, { cache: 'reload', mode: u.startsWith('http') ? 'cors' : 'same-origin' });
+    try { const res = await fetch(req); if (res.ok || res.type === 'opaque') await c.put(new Request(u), res); }
+    catch (err) { try { await c.add(u) } catch (e2) {} }   /* CORSで弾かれたら従来のやり方で */
+  }));
+}
+
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VER).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(precache().then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
