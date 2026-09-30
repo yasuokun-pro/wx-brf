@@ -146,11 +146,11 @@ test('台本：気圧配置を最初に説明し、良い／悪いの向きと�
   });
   assert.equal(syn.now.key, 'trough');
   const lines = script({ sigs: [], judges: { total: 'caution' }, window: WIN, synoptic: syn });
-  const i = lines.findIndex(l => /まず気圧配置です/.test(l.text));
-  assert.equal(i, 1);                                  /* 出だしの次に来る */
+  const i = lines.findIndex(l => /関東甲信に絞ると/.test(l.text));
+  assert.equal(i, 1);                                  /* 出だしの次に来る（概況文・全国が無いとき） */
   assert.ok(lines.slice(1, 5).every(l => l.screen === 1));  /* 画面1（天気図）を見ながら読む */
   const text = lines.map(l => l.text).join('\n');
-  assert.match(text, /関東甲信は気圧の谷・低気圧の接近/);
+  assert.match(text, /関東甲信に絞ると、気圧の谷・低気圧の接近/);
   assert.match(text, /天気は悪くなる方向です/);
   assert.match(text, /根拠は、.*東京 \d+hPa/);
   assert.match(text, /前線の影響です/);
@@ -160,7 +160,7 @@ test('台本：前線の兆しが無ければ天気図で確かめる言い方�
   const syn = synOf({ center: { mslp: () => 1020 }, west: { mslp: () => 1021 }, east: { mslp: () => 1019 }, south: { mslp: () => 1020 } });
   assert.equal(syn.now.key, 'high');
   const text = script({ sigs: [], judges: { total: 'go' }, window: WIN, synoptic: syn }).map(l => l.text).join('\n');
-  assert.match(text, /関東甲信は高気圧に覆われる/);
+  assert.match(text, /関東甲信に絞ると、高気圧に覆われる/);
   assert.match(text, /大きく変わらない見込みです/);
   assert.match(text, /前線や気圧の谷が通る兆しはありません/);
 });
@@ -168,4 +168,25 @@ test('台本：前線の兆しが無ければ天気図で確かめる言い方�
 test('台本：気圧配置のデータが無ければその段は出さない', () => {
   const lines = script({ sigs: [], judges: { total: 'go' }, window: WIN });
   assert.ok(!lines.some(l => /気圧配置/.test(l.text)));
+});
+
+test('台本：気象庁の概況文と全国の気圧配置を、地方の話より先に読む', () => {
+  const lines = script({
+    sigs: [], judges: { total: 'go' }, window: WIN,
+    overview: { office: '気象庁', text: '　高気圧が日本付近を覆っています。前線は日本のはるか南にあります。\n\n　東京地方は晴れています。' },
+    field: { text: '本邦のほぼ全域が高気圧に覆われる見込みです。天気は晴天ベースで推移する見込みです。', basis: ['東日本の平均気圧 1020hPa', '本邦12地点の平均雲量 12%'] },
+    synoptic: synOf({ center: { mslp: () => 1020 }, west: { mslp: () => 1021 }, east: { mslp: () => 1019 }, south: { mslp: () => 1020 } }),
+  });
+  const order = lines.map(l => l.text);
+  assert.match(order[1], /^気象庁の概況です。高気圧が日本付近を覆っています。前線は日本のはるか南にあります。（気象庁発表）$/);
+  assert.match(order[2], /^全国の気圧配置です。本邦のほぼ全域が高気圧に覆われる/);
+  assert.match(order[3], /^根拠は、東日本の平均気圧 1020hPa/);
+  assert.match(order[4], /^関東甲信に絞ると、高気圧に覆われる/);
+  assert.ok(lines.slice(1, 5).every(l => l.screen === 1));
+});
+
+test('台本：概況文も全国も無ければ、その段は出さない', () => {
+  const text = script({ sigs: [], judges: { total: 'go' }, window: WIN }).map(l => l.text).join('\n');
+  assert.equal(/気象庁の概況/.test(text), false);
+  assert.equal(/全国の気圧配置/.test(text), false);
 });

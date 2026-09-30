@@ -199,7 +199,7 @@ test('気圧配置：配置・振れ方・前線と根拠を渡し、画面1を�
   assert.equal(p.synoptic.front.cold, true);
   assert.equal(p.synoptic.front.t, WIN.from.toISOString());
   assert.ok(p.synoptic.basis.includes('西(新潟)−東(銚子) -6hPa'));
-  assert.match(p.coverage.note, /画面1は synoptic/);
+  assert.match(p.coverage.note, /画面1は overview（概況文）・field（全国の気圧場）・synoptic/);
   /* compact でも配置と振れ方は落とさない（根拠だけ絞る） */
   const c = buildPayload({ ...CTX, synoptic: SYN, compact: true });
   assert.equal(c.synoptic.now, '気圧の谷・低気圧の接近');
@@ -207,7 +207,7 @@ test('気圧配置：配置・振れ方・前線と根拠を渡し、画面1を�
   assert.ok(c.synoptic.basis.length <= 5);
   /* 気圧配置が無ければ項目自体を入れない */
   assert.equal(buildPayload(CTX).synoptic, undefined);
-  assert.equal(/画面1は synoptic/.test(buildPayload(CTX).coverage.note), false);
+  assert.equal(/画面1は overview/.test(buildPayload(CTX).coverage.note), false);
 });
 
 test('気圧配置：システムプロンプトで画面1の話し方を指示する', () => {
@@ -216,4 +216,28 @@ test('気圧配置：システムプロンプトで画面1の話し方を指示�
     assert.match(sp, /synoptic/);
     assert.match(sp, /前線/);
   }
+});
+
+test('全国の気圧場と概況文：公式の文を最優先で渡し、画面1を話せる扱いにする', () => {
+  const field = {
+    cover: { label: '本邦のほぼ全域が高気圧に覆われる', whole: 'high' },
+    sky: { label: '晴天ベース' }, skyLater: null,
+    centers: [{ type: 'H', place: '日本の東', hPa: 1020, move: { dir: '東', kmh: 20, text: '東へ20km/h', dHPa: -1.2 } }],
+    ridge: { place: '日本の東', hPa: 1022, edge: true }, homeArea: '東日本', homeSky: { cloudPct: 80, key: 'cloudy' },
+    basis: ['東日本の平均気圧 1020hPa', '本邦12地点の平均雲量 12%', '降水のある地点 0/12', 'a', 'b'],
+    note: '天気図の画像は読めないので…',
+  };
+  const overview = { office: '気象庁', at: WIN.from, text: '　高気圧が日本付近を覆っています。' };
+  const p = buildPayload({ ...CTX, field, overview });
+  assert.equal(p.field.cover, '本邦のほぼ全域が高気圧に覆われる');
+  assert.equal(p.field.sky, '晴天ベース');
+  assert.deepEqual(p.field.centers[0], { type: '高気圧', place: '日本の東', hPa: 1020, move: '東へ20km/h', dHPa: -1.2 });
+  assert.equal(p.field.ridge, '日本の東方面から高気圧 1022hPa');
+  assert.equal(p.field.homeSky, '東日本の平均雲量 80%');
+  assert.match(p.overview.text, /高気圧が日本付近を覆っています/);
+  assert.match(p.coverage.note, /画面1は overview/);
+  const c = buildPayload({ ...CTX, field, overview, compact: true });
+  assert.ok(c.field.basis.length <= 4);
+  assert.ok(c.overview.text.length <= 300);
+  assert.equal(buildPayload(CTX).field, undefined);
 });

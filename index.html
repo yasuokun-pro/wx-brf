@@ -201,9 +201,10 @@ import { addObs, addSnapshot, pairs as vPairs, stats as vStats, correction as vC
 import { splitRoute, passTimes, routeNM, routeMinutes, judgeRoute, judgePass, parseRouteCode, distNM } from './lib/route.js';
 import { signals, script } from './lib/signals.js';
 import { describe as synopticOf } from './lib/synoptic.js';
+import { nationwide } from './lib/field.js';
 import { buildPrompt, parseAiJson, cacheKey } from './lib/ai.js';
 /* ───────── 版番号(更新時は sw.js の VER と一緒に上げる) ───────── */
-const VER_TAG='p3-6', BUILD='2026-09-30';
+const VER_TAG='p3-10', BUILD='2026-10-01';
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/';
 const BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -2137,9 +2138,47 @@ async function fetchSynoptic(){
   return SYNWX;
 }
 
+/* 全国の気圧場（天気図のもとになる数値）。速報天気図はPNG、予想天気図PDFも文字が図形なので、
+   記号「高」「低」は読めない。そこで同じ海面気圧を全国の格子で取り、高低気圧の中心を数値から拾う。
+   格子80点＋本邦の代表12地点を1回でまとめて取る（3時間おき・2日分で約70KB） */
+let FIELD=null;
+async function fetchField(){
+  const S=SRCDEF.synoptic,N=SRCDEF.nwp;
+  if(!S?.grid?.lats?.length) return null;
+  const pts=[];
+  for(const lat of S.grid.lats) for(const lon of S.grid.lons) pts.push({kind:'grid',lat,lon});
+  for(const r of S.regions||[]) pts.push({kind:'region',name:r.name,area:r.area,lat:r.lat,lon:r.lon});
+  const url=`${N.url}?latitude=${pts.map(p=>p.lat).join(',')}&longitude=${pts.map(p=>p.lon).join(',')}`
+    +`&hourly=${S.gridVars.join(',')}&forecast_days=${S.gridDays||2}&timezone=UTC`
+    +(S.gridResolution?`&temporal_resolution=${S.gridResolution}`:'');
+  const r=await getJSON(url);
+  const list=Array.isArray(r.data)?r.data:[r.data];
+  const t0=list[0]?.hourly?.time;
+  if(!t0?.length) return null;
+  FIELD={got:r.got,offline:r.offline,times:t0.map(t=>new Date(t+'Z')),
+    points:pts.map((p,i)=>{
+      const h=list[i]?.hourly||{};
+      return {...p,mslp:h.pressure_msl||[],cloud:h.cloud_cover||[],precip:h.precipitation||[]};
+    })};
+  setStatus('field',{label:'全国の気圧場',pubLabel:'取得',staleMin:240,got:r.got,offline:r.offline,err:null});
+  return FIELD;
+}
+/* 気象庁の概況文（公式の言い方。気圧配置と前線の位置はこれが正） */
+async function fetchOverview(office){
+  const W=SRCDEF.weekly;
+  if(!W?.overview) return null;
+  const r=await getJSON(W.overview.replace('{office}',office));
+  const d=r.data;
+  if(!d?.text) return null;
+  setStatus('ovw',{label:'気象概況（気象庁の文）',pubLabel:'発表',staleMin:W.staleMin,got:r.got,offline:r.offline,
+    pub:d.reportDatetime?new Date(d.reportDatetime):null,err:null});
+  return {office:d.publishingOffice||'気象庁',at:d.reportDatetime?new Date(d.reportDatetime):null,
+    area:d.targetArea||null,text:d.text};
+}
+
 /* 仕様書 第4章の「総合解析」のうち、コードで計算できる突き合わせ（lib/signals.js）を出し、
    そこから読み上げ用の台本を組み立てる。AI解説（フェーズ3）は、この結果を文章にする役割 */
-const SUM={sigs:[],lines:[],got:null,syn:null};
+const SUM={sigs:[],lines:[],got:null,syn:null,fld:null,ovw:null};
 let AICTX=null;
 
 /* 台本に必要な材料を集める。まだ開いていない画面のデータは、ここで取りに行く */
@@ -2181,12 +2220,17 @@ async function gatherContext({fetchIfMissing=true}={}){
       tmax:w1?.areas?.[0]?.tempsMax?.[i]||null,tmin:w1?.areas?.[0]?.tempsMin?.[i]||null}));
   }catch(e){}
   /* 気圧配置：取れなくても台本は作る（その旨を台本に書く） */
-  let syn=null;
+  let syn=null,fld=null,ovw=null;
   try{
     if(fetchIfMissing||!SYNWX) await fetchSynoptic();
     if(SYNWX) syn=synopticOf(SYNWX,win,{area:SRCDEF.synoptic?.area||'関東甲信'});
   }catch(e){}
-  return {win,mn,airfields,nwp,route:RTE.rows?.length?RTE:null,vertAd,fcst,weekly,syn};
+  try{
+    if(fetchIfMissing||!FIELD) await fetchField();
+    if(FIELD) fld=nationwide(FIELD,win,{homeArea:SRCDEF.synoptic?.homeArea||null});
+  }catch(e){}
+  try{ ovw=await fetchOverview((store.get('wx.cfg')||{}).office||'130000') }catch(e){}
+  return {win,mn,airfields,nwp,route:RTE.rows?.length?RTE:null,vertAd,fcst,weekly,syn,fld,ovw};
 }
 /* 電文から読み取った値をAIに渡す形にする（原文を送らないときでも数値が伝わるように）。
    貼り付けた電文（手入力）も中継のものと同じ形で入る */
@@ -2259,41 +2303,51 @@ async function buildSummary(force){
     const ctx=await gatherContext({fetchIfMissing:force||!SUM.got});
     const first=ctx.airfields[0];
     SUM.sigs=signals({nwp:ctx.nwp,metar:first?.p,taf:first?.t,route:ctx.route,window:ctx.win,minima:ctx.mn});
-    SUM.syn=ctx.syn||null;
+    SUM.syn=ctx.syn||null;SUM.fld=ctx.fld||null;SUM.ovw=ctx.ovw||null;
     SUM.lines=script({sigs:SUM.sigs,judges:{total:worst(JUDGE_ROWS.filter(r=>!r.none).map(r=>JUDGE.get(r.n)?.level||'none'))},
-      window:ctx.win,airfields:ctx.airfields,route:ctx.route,synoptic:ctx.syn});
+      window:ctx.win,airfields:ctx.airfields,route:ctx.route,synoptic:ctx.syn,field:ctx.fld,overview:ctx.ovw});
     SUM.got=new Date();
     /* AIに渡す材料（手貼り・API どちらでも同じものを使う） */
     AICTX={win:ctx.win,fcst:ctx.fcst,weekly:ctx.weekly,judges:{total:worst(JUDGE_ROWS.filter(r=>!r.none).map(r=>JUDGE.get(r.n)?.level||'none')),
       ...Object.fromEntries(JUDGE_ROWS.map(r=>[r.n,JUDGE.get(r.n)?.level||'none']))},
       sigs:SUM.sigs,airfields:ctx.airfields,nwp:ctx.nwp?{...ctx.nwp,got:VERT.data?.got}:null,route:ctx.route,
-      office:(store.get('wx.cfg')||{}).office||null,synoptic:ctx.syn,learn:learnOn()};
+      office:(store.get('wx.cfg')||{}).office||null,synoptic:ctx.syn,field:ctx.fld,overview:ctx.ovw,learn:learnOn()};
     const ai=aiGet();
     if(ai) {ai.stale=ai.key!==cacheKey(AICTX);store.set('wx.ai',ai)}
     renderHomeSummary();
     st.innerHTML=`作成 ${fJst(SUM.got)} ・ 対象 ${fJst(ctx.win.from)}〜${fJst(ctx.win.to)} JST`
-      +`<br>材料：${ctx.syn?.now?.key?`気圧配置（${esc(ctx.syn.area)}）`:'気圧配置なし'} ／ ${ctx.nwp?`数値予報（${esc(ctx.vertAd||'')}）`:'数値予報なし'} ／ ${ctx.airfields.length?`飛行場 ${ctx.airfields.map(a=>a.icao).join('・')}`:'飛行場なし'} ／ ${ctx.route?`経路 ${ctx.route.rows.length}区間`:'経路なし'}`;
+      +`<br>材料：${ctx.ovw?'概況文':'概況文なし'} ／ ${ctx.fld?.cover?'全国の気圧場':'全国の気圧場なし'} ／ ${ctx.syn?.now?.key?`気圧配置（${esc(ctx.syn.area)}）`:'気圧配置なし'} ／ ${ctx.nwp?`数値予報（${esc(ctx.vertAd||'')}）`:'数値予報なし'} ／ ${ctx.airfields.length?`飛行場 ${ctx.airfields.map(a=>a.icao).join('・')}`:'飛行場なし'} ／ ${ctx.route?`経路 ${ctx.route.rows.length}区間`:'経路なし'}`;
     renderSynoptic();renderSignals();renderScript();renderAi();
   }catch(e){st.innerHTML=`<span class="stale">作れませんでした：${esc(e.message)}</span>`}
 }
 /* 気圧配置のカード（台本の元になる中身を、根拠つきで見せる） */
 function renderSynoptic(){
   const el=$('#sumSyn');if(!el)return;
-  const syn=SUM.syn;
-  const head='<h3>気圧配置<span class="sp"></span><span class="note">数値予報の気圧から自動判定</span></h3>';
+  const syn=SUM.syn,fld=SUM.fld,ovw=SUM.ovw;
+  const head='<h3>気圧配置<span class="sp"></span><span class="note">天気図のもとになる気圧の数値から自動判定</span></h3>';
+  /* 気象庁の概況文（公式）。数値の判定と食い違うときはこちらが正 */
+  const ovwHtml=ovw?`<p class="note" style="margin-bottom:8px"><b>気象庁の概況</b>（${esc(ovw.office)}${ovw.at?' '+fJst(ovw.at):''}）<br>${esc(String(ovw.text).replace(/\s+/g,' ').trim().split('。').slice(0,4).join('。')+'。')}</p>`:'';
+  /* 全国：高気圧・低気圧の中心と、本邦の覆われ方・晴天ベースか */
+  const fldHtml=fld?.cover?`
+    <table class="t">
+      <tr><td>本邦の覆われ方</td><td><b>${esc(fld.cover.label)}</b></td></tr>
+      <tr><td>天気の傾向</td><td><b>全国は${esc(fld.sky?.label||'—')}</b>${fld.skyLater?`（のち ${esc(fld.skyLater.label)}）`:''}${fld.homeSky&&fld.homeSky.key!==fld.sky?.key?`<br>ただし${esc(fld.homeArea)}は<b>${esc({fine:'晴天ベース',partly:'晴れ間もあるが雲も多い天気',cloudy:'曇りベース',rain:'雨や雲の多い天気'}[fld.homeSky.key]||'—')}</b>（平均雲量${fld.homeSky.cloudPct}%）`:''}</td></tr>
+      <tr><td>高気圧・低気圧</td><td>${[...fld.centers.map(c=>`${esc(c.place)}に${c.type==='H'?'高気圧':'低気圧'} ${c.hPa}hPa${c.move?`（${esc(c.move.text)}${Math.abs(c.move.dHPa)>=3?`・${c.move.hours}時間で${Math.abs(c.move.dHPa)}hPa${c.move.dHPa<0?'下がり発達':'上がり衰える'}`:''}）`:''}`),...(fld.ridge?[`${esc(fld.ridge.place)}${fld.ridge.edge?'方面':''}から高気圧が張り出す ${fld.ridge.hPa}hPa`]:[])].join('<br>')||'本邦の近くに中心なし'}</td></tr>
+    </table>`:'<p class="note">全国の気圧場を取れていません。</p>';
   if(!syn?.now?.key){
-    el.innerHTML=head+'<p class="note">気圧配置を判定できていません（周辺地点の数値予報が取れていない）。天気図（画面1）で気圧の並びと前線の位置を確かめてください。</p>';
+    el.innerHTML=head+ovwHtml+fldHtml+'<p class="note">飛行する地方の気圧配置は判定できていません（周辺地点の数値予報が取れていない）。天気図（画面1）で確かめてください。</p>';
     return;
   }
   const arrow={improving:'go',worsening:'nogo',steady:'caution'}[syn.trend.key]||'caution';
-  el.innerHTML=head+`
+  el.innerHTML=head+ovwHtml+fldHtml+`
+    <p class="note" style="margin:10px 0 2px"><b>${esc(syn.area)}に絞ると</b></p>
     <table class="t">
       <tr><td>いまの配置</td><td><b>${esc(syn.now.label)}</b></td></tr>
       ${syn.later?`<tr><td>後半の配置</td><td><b>${esc(syn.later.label)}</b>に変わる見込み</td></tr>`:''}
       <tr><td>天気の振れ方</td><td><span class="lvl ${arrow}"></span><b>${esc(syn.trend.label)}</b></td></tr>
       <tr><td>前線・気圧の谷</td><td>${syn.front?esc(syn.front.text):'数値の上では通過の兆しなし（天気図で確かめる）'}</td></tr>
     </table>
-    <p class="note">根拠：${syn.basis.map(esc).join(' ／ ')}</p>
+    <p class="note">根拠：${[...(fld?.basis||[]).slice(0,3),...syn.basis].map(esc).join(' ／ ')}</p>
     <p class="note">${esc(syn.note)}。<a href="#" data-go="1">画面1の天気図を見る</a></p>`;
   el.querySelectorAll('[data-go]').forEach(a=>a.onclick=e=>{e.preventDefault();goTo(SCREENS.findIndex(x=>x.n===+a.dataset.go))});
 }

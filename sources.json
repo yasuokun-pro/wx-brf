@@ -336,6 +336,8 @@
   },
   "weekly": {
     "forecast": "https://www.jma.go.jp/bosai/forecast/data/forecast/{office}.json",
+    "overview": "https://www.jma.go.jp/bosai/forecast/data/overview_forecast/{office}.json",
+    "overviewWeek": "https://www.jma.go.jp/bosai/forecast/data/overview_week/{office}.json",
     "areaList": "https://www.jma.go.jp/bosai/common/const/area.json",
     "staleMin": 840,
     "page": "https://www.jma.go.jp/bosai/forecast/"
@@ -387,8 +389,9 @@
     "attribution": "Open-Meteo（気象庁モデル）"
   },
   "synoptic": {
-    "_note": "気圧配置の判定（lib/synoptic.js）。関東甲信越を囲む地点の海面気圧・風・850hPa気温を1回のリクエストでまとめて取る。role=center/west/east/south/mountain",
+    "_note": "気圧配置。points=関東甲信越の周辺（lib/synoptic.js）、grid+regions=全国の気圧場（lib/field.js）。天気図は画像で記号を読めないので、天気図のもとになる数値から高低気圧の中心を拾う。格子は端の点を中心にしないので、日本の周りを広めに取る（25〜47.5N／120〜155E、2.5度ごと＝150点・約130KB）",
     "area": "関東甲信",
+    "homeArea": "東日本",
     "vars": [
       "pressure_msl",
       "wind_direction_10m",
@@ -426,6 +429,118 @@
         "role": "mountain",
         "lat": 36.24,
         "lon": 137.97
+      }
+    ],
+    "gridVars": [
+      "pressure_msl",
+      "cloud_cover",
+      "precipitation"
+    ],
+    "gridDays": 2,
+    "gridResolution": "hourly_3",
+    "grid": {
+      "lats": [
+        25.0,
+        27.5,
+        30.0,
+        32.5,
+        35.0,
+        37.5,
+        40.0,
+        42.5,
+        45.0,
+        47.5
+      ],
+      "lons": [
+        120.0,
+        122.5,
+        125.0,
+        127.5,
+        130.0,
+        132.5,
+        135.0,
+        137.5,
+        140.0,
+        142.5,
+        145.0,
+        147.5,
+        150.0,
+        152.5,
+        155.0
+      ]
+    },
+    "regions": [
+      {
+        "name": "札幌",
+        "area": "北日本",
+        "lat": 43.06,
+        "lon": 141.35
+      },
+      {
+        "name": "青森",
+        "area": "北日本",
+        "lat": 40.82,
+        "lon": 140.74
+      },
+      {
+        "name": "仙台",
+        "area": "北日本",
+        "lat": 38.27,
+        "lon": 140.87
+      },
+      {
+        "name": "新潟",
+        "area": "東日本",
+        "lat": 37.9,
+        "lon": 139.02
+      },
+      {
+        "name": "東京",
+        "area": "東日本",
+        "lat": 35.69,
+        "lon": 139.69
+      },
+      {
+        "name": "名古屋",
+        "area": "東日本",
+        "lat": 35.18,
+        "lon": 136.91
+      },
+      {
+        "name": "大阪",
+        "area": "西日本",
+        "lat": 34.69,
+        "lon": 135.52
+      },
+      {
+        "name": "広島",
+        "area": "西日本",
+        "lat": 34.39,
+        "lon": 132.46
+      },
+      {
+        "name": "高知",
+        "area": "西日本",
+        "lat": 33.56,
+        "lon": 133.53
+      },
+      {
+        "name": "福岡",
+        "area": "西日本",
+        "lat": 33.59,
+        "lon": 130.4
+      },
+      {
+        "name": "鹿児島",
+        "area": "西日本",
+        "lat": 31.6,
+        "lon": 130.56
+      },
+      {
+        "name": "那覇",
+        "area": "沖縄",
+        "lat": 26.21,
+        "lon": 127.68
       }
     ]
   },
